@@ -1,0 +1,39 @@
+# Step 2: privacy and fidelity of the synthetic table against the training and control splits
+Splitter:
+  external_split:
+    method: custom_data
+    filepath:
+      ori: A_train.csv
+      control: A_control.csv
+Synthesizer:
+  external_data:
+    method: custom_data
+    filepath: synthetic.csv
+Evaluator:
+  validity:
+    method: sdmetrics-diagnosticreport
+  fidelity:
+    method: sdmetrics-qualityreport
+  singling_out:
+    method: anonymeter-singlingout
+    n_attacks: 1000
+    n_cols: 3
+    max_attempts: 100000
+  linkability:
+    method: anonymeter-linkability
+    max_n_attacks: true
+    n_neighbors: 1
+    aux_cols:
+      - [event_month, event_weekday, event_hour, location]
+      - [vehicle_kind, suspect_age_group, suspect_gender, casualty_count, is_drug_related]
+  inference:
+    method: anonymeter-inference
+    max_n_attacks: true
+    secret: is_drug_related
+Reporter:
+  rpt:
+    method: 'save_report'
+    granularity:
+      - 'global'
+      - 'columnwise'
+      - 'pairwise'

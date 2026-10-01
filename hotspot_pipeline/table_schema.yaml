@@ -1,0 +1,11 @@
+id: analysis_table
+attributes:
+  location:
+    type: str
+    category: true
+  severity_score:
+    type: int
+    category: true
+  recidivism_count:
+    type: int
+    category: true

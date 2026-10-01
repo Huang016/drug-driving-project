@@ -2,5 +2,13 @@
 __pycache__/
 backup_random_A/
 c_draft_unused/
-petsard_run/A_trial_20000.csv
-petsard_run/trial_log.txt
+
+# regenerated on every run
+psi_pqc/wire/
+psi_pqc/wire_test/
+hotspot_pipeline/out_*/
+hotspot_pipeline/analysis_table.csv
+hotspot_pipeline/table_*.csv
+petsard_run/out_*/
+petsard_run/A_train*.csv
+petsard_run/A_control*.csv

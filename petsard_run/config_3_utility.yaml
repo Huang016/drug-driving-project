@@ -1,0 +1,23 @@
+# Step 3: one model trained on the original, one on the synthetic table, both tested on the control split
+Splitter:
+  external_split:
+    method: custom_data
+    filepath:
+      ori: A_train_label.csv
+      control: A_control_label.csv
+Synthesizer:
+  external_data:
+    method: custom_data
+    filepath: synthetic_label.csv
+Evaluator:
+  utility:
+    method: mlutility
+    task_type: classification
+    experiment_design: dual_model_control
+    target: is_drug_related
+    metrics: [mcc, f1_score, roc_auc, pr_auc]
+Reporter:
+  rpt:
+    method: 'save_report'
+    granularity:
+      - 'global'

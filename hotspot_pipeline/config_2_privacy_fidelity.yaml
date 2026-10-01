@@ -1,0 +1,39 @@
+# Stage 3b: fidelity and privacy of the synthetic table against the training and control splits
+Splitter:
+  external_split:
+    method: custom_data
+    filepath:
+      ori: table_train.csv
+      control: table_control.csv
+Synthesizer:
+  external_data:
+    method: custom_data
+    filepath: synthetic.csv
+Evaluator:
+  validity:
+    method: sdmetrics-diagnosticreport
+  fidelity:
+    method: sdmetrics-qualityreport
+  singling_out:
+    method: anonymeter-singlingout
+    n_attacks: 300
+    n_cols: __N_COLS__
+    max_attempts: 30000
+  linkability:
+    method: anonymeter-linkability
+    max_n_attacks: true
+    n_neighbors: 1
+    aux_cols:
+      - [location]
+      - [__SECRET_COLS__]
+  inference:
+    method: anonymeter-inference
+    max_n_attacks: true
+    secret: severity_score
+Reporter:
+  rpt:
+    method: 'save_report'
+    granularity:
+      - 'global'
+      - 'columnwise'
+      - 'pairwise'

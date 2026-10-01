@@ -1,0 +1,23 @@
+# Step 1: synthesize from the training split only. __METHOD__ is filled in by run_method.sh
+Loader:
+  A:
+    filepath: A_train.csv
+    schema: A_generalized_schema.yaml
+Preprocessor:
+  # no outlier step: every column is categorical, and IQR would delete the 5% drug-related rows
+  no_outlier:
+    method: 'default'
+    sequence:
+      - missing
+      - encoder
+      - scaler
+Synthesizer:
+  syn:
+    method: '__METHOD__'
+Postprocessor:
+  default:
+    method: 'default'
+Reporter:
+  data:
+    method: 'save_data'
+    source: 'Postprocessor'

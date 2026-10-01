@@ -1,0 +1,6 @@
+# Python 3.10 or 3.11 (PETsARD does not support 3.12+)
+petsard[all]==1.10.1
+sdv>=1.26.0,<2
+pynacl>=1.6
+kyber-py>=1.2
+cryptography>=42

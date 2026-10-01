@@ -1,0 +1,29 @@
+id: A_generalized
+attributes:
+  event_month:
+    type: int
+    category: true
+  event_weekday:
+    type: str
+    category: true
+  event_hour:
+    type: int
+    category: true
+  location:
+    type: str
+    category: true
+  vehicle_kind:
+    type: str
+    category: true
+  suspect_age_group:
+    type: str
+    category: true
+  suspect_gender:
+    type: str
+    category: true
+  casualty_count:
+    type: int
+    category: true
+  is_drug_related:
+    type: int
+    category: true

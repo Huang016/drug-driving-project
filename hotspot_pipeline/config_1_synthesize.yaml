@@ -1,0 +1,23 @@
+# Stage 3a: synthesize from the training split only. __METHOD__ is filled in by run_stage3.sh
+Loader:
+  table:
+    filepath: table_train.csv
+    schema: table_schema.yaml
+Preprocessor:
+  # no outlier step: every column is categorical, and IQR would delete the rare categories
+  no_outlier:
+    method: 'default'
+    sequence:
+      - missing
+      - encoder
+      - scaler
+Synthesizer:
+  syn:
+    method: '__METHOD__'
+Postprocessor:
+  default:
+    method: 'default'
+Reporter:
+  data:
+    method: 'save_data'
+    source: 'Postprocessor'
