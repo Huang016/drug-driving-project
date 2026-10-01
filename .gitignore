@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+backup_random_A/
+c_draft_unused/
+petsard_run/A_trial_20000.csv
+petsard_run/trial_log.txt
