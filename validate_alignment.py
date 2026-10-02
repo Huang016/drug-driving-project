@@ -18,9 +18,9 @@ assert list(handoff.columns) == ['master_id', 'hashed_id', 'age_group', 'gender'
 assert list(a.columns) == ['master_id', 'hashed_id', 'event_date', 'event_hour', 'county', 'district', 'lat_raw', 'lon_raw', 'vehicle_type', 'is_drug_related', 'suspect_age_group', 'suspect_gender', 'casualty_count', 'prior_offense_flag']
 assert list(b.columns) == ['master_id', 'hashed_id', 'test_date', 'specimen_type', 'test_result', 'positive_substance', 'drug_class', 'age_group', 'gender', 'severity_score']
 
-assert len(handoff) == 5000
-assert len(a) == 8000
-assert len(b) == 5000
+assert len(handoff) == len(b)
+assert len(a) == round(len(b) * 1.6)
+assert list(b['master_id']) == list(range(1, len(b) + 1))
 assert a['master_id'].is_unique
 
 # A∩B: only B positives caught while driving, and they carry B's age_group/gender

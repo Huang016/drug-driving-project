@@ -8,7 +8,8 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parent
 SALT = "innoserve2026-drugdriving"
 SEED = 20261001
-A_SIZE = 8000
+# A is this many times the size of B, so A grows with B (8000 rows for 5000 people)
+A_TO_B_RATIO = 1.6
 MAX_COORD_OFFSET = 0.3
 POSITIVE_IN_A_RATE = 0.50
 MOTOR_VEHICLE_KINDS = ["機車", "小客車(含客、貨兩用)", "小貨車", "大貨車", "大客車", "曳引車", "半聯結車", "全聯結車"]
@@ -90,7 +91,7 @@ def build_a_aligned(handoff: pd.DataFrame, a_raw: pd.DataFrame) -> pd.DataFrame:
     # assumed share of B positives caught while driving; only these people exist in both A and B
     positive = handoff[handoff["test_result"] == "陽性"]
     linked = positive.sample(frac=POSITIVE_IN_A_RATE, random_state=SEED).sort_values("master_id")
-    n_a_only = A_SIZE - len(linked)
+    n_a_only = round(len(handoff) * A_TO_B_RATIO) - len(linked)
 
     # drug driving only applies to someone driving a motor vehicle, not pedestrians, passengers or bicycles
     is_motor_vehicle = a_raw["vehicle_type"].str.split("-").str[0].isin(MOTOR_VEHICLE_KINDS)
