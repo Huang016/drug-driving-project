@@ -3,4 +3,5 @@ petsard[all]==1.10.1
 sdv>=1.26.0,<2
 pynacl>=1.6
 kyber-py>=1.2
+dilithium-py>=1.4
 cryptography>=42

@@ -6,6 +6,10 @@ c_draft_unused/
 # regenerated on every run
 psi_pqc/wire/
 psi_pqc/wire_test/
+psi_pqc/received/
+psi_pqc/node_logs/
+# private keys never leave the machine that made them; public keys are exchanged between the parties, not committed
+psi_pqc/keys/
 hotspot_pipeline/out_*/
 hotspot_pipeline/analysis_table.csv
 hotspot_pipeline/table_*.csv
