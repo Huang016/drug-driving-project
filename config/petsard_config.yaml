@@ -1,0 +1,47 @@
+---
+Loader:
+  wide:
+    filepath: data/wide/wide_table_petsard_input.csv   # repo path (pipeline: ttp/wide_petsard.csv)
+    schema: config/wide_schema.yaml
+Splitter:
+  holdout:
+    num_samples: 10             # 10 independent splits: report mean and range of each risk
+    train_split_ratio: 0.5      # 50/50: anonymeter's singling-out is biased upward when the training set is larger
+                                # than the control set (null test: 0.13-0.17 'risk' with zero leakage at 2:1 sizes)
+Preprocessor:
+  default:
+    method: default
+    sequence: [missing, encoder, scaler]   # no outlier removal: it would drop real rows from training
+Synthesizer:
+  default:
+    method: default             # petsard-gaussian_copula
+Postprocessor:
+  default:
+    method: default
+Evaluator:
+  validity:
+    method: sdmetrics-diagnosticreport
+  fidelity:
+    method: sdmetrics-qualityreport
+  singling_out:
+    method: anonymeter-singlingout
+    n_attacks: 400
+    max_attempts: 500000        # 4000 let the attack build only ~10 queries -> risk was underestimated
+  linkability:
+    method: anonymeter-linkability
+    aux_cols:
+      - [event_month, weekday, event_hour, county, vehicle_group, accident_class, injury_count]
+      - [age_group, gender, specimen_type, positive_substance, recidivism_count]
+  inference_recidivism:
+    method: anonymeter-inference
+    secret: recidivism_count
+  # note: a text secret (e.g. positive_substance) crashes anonymeter 1.x on pandas string dtype
+  #       ("boolean value of NA is ambiguous"), so the inference attack uses an integer-coded secret
+Reporter:
+  save_synthetic:
+    method: save_data
+    source: Postprocessor
+  save_report_global:
+    method: save_report
+    granularity: global
+...
