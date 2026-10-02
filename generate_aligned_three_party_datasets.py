@@ -1,4 +1,3 @@
-import hashlib
 import random
 from pathlib import Path
 
@@ -6,12 +5,11 @@ import numpy as np
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
-SALT = "innoserve2026-drugdriving"
 SEED = 20261001
-# A is this many times the size of B, so A grows with B (8000 rows for 5000 people)
+# A is this many times the size of B, so A grows with B (80000 rows for 50000 people)
 A_TO_B_RATIO = 1.6
 MAX_COORD_OFFSET = 0.3
-POSITIVE_IN_A_RATE = 0.50
+POSITIVE_IN_A_RATE = 0.20
 MOTOR_VEHICLE_KINDS = ["機車", "小客車(含客、貨兩用)", "小貨車", "大貨車", "大客車", "曳引車", "半聯結車", "全聯結車"]
 
 AGE_ORDER = ["19歲以下", "20-29歲", "30-39歲", "40-49歲", "50-59歲", "60歲以上"]
@@ -20,14 +18,8 @@ FEMALE_AGE_WEIGHTS = [0.021, 0.092, 0.177, 0.413, 0.225, 0.072]
 MALE_AGE_PROBS = [w / sum(MALE_AGE_WEIGHTS) for w in MALE_AGE_WEIGHTS]
 FEMALE_AGE_PROBS = [w / sum(FEMALE_AGE_WEIGHTS) for w in FEMALE_AGE_WEIGHTS]
 DRUG_CLASSES = ["一級", "二級", "三級", "無"]
-SUBSTANCE_CLASS = {"嗎啡": "一級", "安非他命": "二級", "甲基安非他命": "二級", "愷他命": "三級"}
+SUBSTANCE_CLASS = {"嗎啡": "一級", "安非他命": "二級", "甲基安非他命": "二級", "MDMA": "二級", "愷他命": "三級"}
 CLASS_SEVERITY = {"一級": 3.0, "二級": 2.0, "三級": 1.0, "無": 0.0}
-
-
-def to_shared_hashed_id(master_id: int, salt: str = SALT) -> str:
-    master_id_str = f"{master_id:06d}"
-    raw = f"{salt}:{master_id_str}".encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()[:16]
 
 
 def make_b_consistent(b_raw: pd.DataFrame) -> pd.DataFrame:
@@ -49,17 +41,14 @@ def make_b_consistent(b_raw: pd.DataFrame) -> pd.DataFrame:
 def build_handoff_master_population(b_raw: pd.DataFrame) -> pd.DataFrame:
     handoff = b_raw[["test_result", "drug_class", "age_group", "gender"]].copy()
     handoff.insert(0, "master_id", list(range(1, len(b_raw) + 1)))
-    handoff.insert(1, "hashed_id", [to_shared_hashed_id(m) for m in handoff["master_id"]])
-    return handoff[["master_id", "hashed_id", "age_group", "gender", "drug_class", "test_result"]].copy()
+    return handoff[["master_id", "age_group", "gender", "drug_class", "test_result"]].copy()
 
 
 def make_b_aligned(b_raw: pd.DataFrame) -> pd.DataFrame:
     b_aligned = b_raw.copy()
     b_aligned.insert(0, "master_id", list(range(1, len(b_aligned) + 1)))
-    b_aligned.insert(1, "hashed_id", [to_shared_hashed_id(m) for m in b_aligned["master_id"]])
     return b_aligned[[
         "master_id",
-        "hashed_id",
         "test_date",
         "specimen_type",
         "test_result",
@@ -101,7 +90,6 @@ def build_a_aligned(handoff: pd.DataFrame, a_raw: pd.DataFrame) -> pd.DataFrame:
 
     a_only_ids = range(len(handoff) + 1, len(handoff) + 1 + n_a_only)
     a_df.insert(0, "master_id", list(linked["master_id"]) + list(a_only_ids))
-    a_df.insert(1, "hashed_id", [to_shared_hashed_id(m) for m in a_df["master_id"]])
 
     a_only_gender = random.choices(["男", "女"], weights=[0.829, 0.171], k=n_a_only)
     a_only_age = [sample_age_for_gender(g) for g in a_only_gender]
@@ -110,7 +98,6 @@ def build_a_aligned(handoff: pd.DataFrame, a_raw: pd.DataFrame) -> pd.DataFrame:
 
     return a_df[[
         "master_id",
-        "hashed_id",
         "event_date",
         "event_hour",
         "county",
@@ -143,8 +130,7 @@ def main():
     print(f"- handoff_master_population.csv: {len(handoff)} rows")
     print(f"- dataset_b_aligned.csv: {len(b_aligned)} rows")
     print(f"- PETsARD_Dataset_A_aligned.csv: {len(a_aligned)} rows")
-    print("- hash formula: SHA256(salt:id_6digit)[:16]")
-    in_both = a_aligned.merge(handoff, on="hashed_id")
+    in_both = a_aligned.merge(handoff, on="master_id")
     print(f"- A rows also in B: {len(in_both)} (all B positive: {bool((in_both['test_result'] == '陽性').all())})")
 
 
