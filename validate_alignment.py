@@ -1,16 +1,22 @@
+import hashlib
 from pathlib import Path
 
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
+SALT = 'innoserve2026-drugdriving'
+
+
+def hash_id(master_id: int) -> str:
+    return hashlib.sha256(f'{SALT}:{master_id:06d}'.encode('utf-8')).hexdigest()[:16]
 
 handoff = pd.read_csv(BASE_DIR / 'handoff_master_population.csv')
 a = pd.read_csv(BASE_DIR / 'PETsARD_Dataset_A_aligned.csv')
 b = pd.read_csv(BASE_DIR / 'dataset_b_aligned.csv')
 
-assert list(handoff.columns) == ['master_id', 'age_group', 'gender', 'drug_class', 'test_result']
-assert list(a.columns) == ['master_id', 'event_date', 'event_hour', 'county', 'district', 'lat_raw', 'lon_raw', 'vehicle_type', 'is_drug_related', 'suspect_age_group', 'suspect_gender', 'casualty_count', 'prior_offense_flag']
-assert list(b.columns) == ['master_id', 'test_date', 'specimen_type', 'test_result', 'positive_substance', 'drug_class', 'age_group', 'gender', 'severity_score']
+assert list(handoff.columns) == ['master_id', 'hashed_id', 'age_group', 'gender', 'drug_class', 'test_result']
+assert list(a.columns) == ['master_id', 'hashed_id', 'event_date', 'event_hour', 'county', 'district', 'lat_raw', 'lon_raw', 'vehicle_type', 'is_drug_related', 'suspect_age_group', 'suspect_gender', 'casualty_count', 'prior_offense_flag']
+assert list(b.columns) == ['master_id', 'hashed_id', 'test_date', 'specimen_type', 'test_result', 'positive_substance', 'drug_class', 'age_group', 'gender', 'severity_score']
 
 assert len(handoff) == len(b)
 assert len(a) == round(len(b) * 1.6)
@@ -26,6 +32,10 @@ assert all(both['suspect_age_group'] == both['age_group']) and all(both['suspect
 assert all(a['is_drug_related'] == a['master_id'].isin(both['master_id']).astype(int)), 'is_drug_related does not match A∩B membership'
 MOTOR_VEHICLE_KINDS = ['機車', '小客車(含客、貨兩用)', '小貨車', '大貨車', '大客車', '曳引車', '半聯結車', '全聯結車']
 assert all(both['vehicle_type'].str.split('-').str[0].isin(MOTOR_VEHICLE_KINDS)), 'A∩B contains a non-motor-vehicle party'
+
+# hash formula validation
+assert all(a['hashed_id'] == a['master_id'].map(hash_id))
+assert all(b['hashed_id'] == b['master_id'].map(hash_id))
 
 # handoff carries B's values
 assert handoff[['age_group', 'gender', 'drug_class', 'test_result']].equals(b[['age_group', 'gender', 'drug_class', 'test_result']])
