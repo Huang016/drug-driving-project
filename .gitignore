@@ -2,6 +2,7 @@
 __pycache__/
 backup_random_A/
 c_draft_unused/
+PETsARD_*.txt
 
 # regenerated on every run
 psi_pqc/wire/

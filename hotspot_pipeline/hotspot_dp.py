@@ -4,7 +4,9 @@ applied before anything is published.
 Usage: python hotspot_dp.py <synthetic release csv> [epsilon]
 
 Per district the release contains a noisy count and a noisy mean severity
-(and a noisy recidivist share once C's column is in the table).
+(and a noisy recidivist share once C's column is in the table). The noise is
+added to the real analysis table, inside the coordinator's controlled
+environment; the synthetic table is only compared against it.
 
 Privacy accounting
   One person appears in exactly one district, so the districts are disjoint and
@@ -77,7 +79,9 @@ def main():
 
     real = district_stats(pd.read_csv(BASE_DIR / "analysis_table.csv"), districts)
     synthetic = district_stats(pd.read_csv(synthetic_path), districts)
-    release = published(add_noise(synthetic, epsilon, np.random.default_rng(SEED)))
+    # the noise goes on the real table: the synthesizer is not differentially private, so one
+    # person's effect on a synthetic count is not bounded by the sensitivities above
+    release = published(add_noise(real, epsilon, np.random.default_rng(SEED)))
 
     result = districts.join(real["n"].rename("n_real")).join(synthetic["n"].rename("n_synthetic")).join(release)
     output = synthetic_path.parent / f"hotspot_eps{epsilon:g}.csv"
@@ -89,7 +93,7 @@ def main():
     print(f"{output.name}: epsilon {epsilon:g}, {len(result)} districts, {shown.sum()} shown (noisy count >= {MIN_PUBLISHED_COUNT})")
     print(f"  real vs synthetic count correlation:  {result['n_real'].corr(result['n_synthetic']):.3f}")
     print(f"  real vs published count correlation:  {result['n_real'].corr(result['n_published'].fillna(0)):.3f}")
-    print(f"  top-10 districts kept after synthesis + DP: {len(top_real & top_published)} of 10")
+    print(f"  top-10 districts kept after DP: {len(top_real & top_published)} of 10")
     print(f"  districts shown that have nobody in the real table: {(shown & (result['n_real'] == 0)).sum()}")
 
 

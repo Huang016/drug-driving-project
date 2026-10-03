@@ -13,13 +13,14 @@ import pandas as pd
 import psi
 
 DATA_DIR = Path(__file__).resolve().parent.parent
-A_PATH = DATA_DIR / "PETsARD_Dataset_A_aligned.csv"
-B_PATH = DATA_DIR / "dataset_b_aligned.csv"
-C_PATH = DATA_DIR / "dataset_c_aligned.csv"
+RAW_DIR = DATA_DIR / "data" / "raw"
+A_PATH = RAW_DIR / "Dataset_A_.csv"
+B_PATH = RAW_DIR / "Dataset_B_.csv"
+C_PATH = RAW_DIR / "Dataset_C_raw.csv"
 
 LABELS = {"A": "警政A", "B": "檢驗B", "C": "監理C", "K": "協調者"}
 INSTITUTION_CODES = ["A", "B", "C"]
-C_STAND_IN_NOTICE = "注意：dataset_c_aligned.csv 尚未提供，監理C 先用規格書的納入規則產生 ID 清單，不提供任何欄位"
+C_STAND_IN_NOTICE = "注意：Dataset_C_raw.csv 尚未提供，監理C 先用規格書的納入規則產生 ID 清單，不提供任何欄位"
 
 
 def person_id(master_id: int) -> str:

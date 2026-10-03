@@ -84,7 +84,7 @@ const DATA = __DATA__;
 const PANELS = [
   {key: "n_real", title: "真實交集", note: "協調者合併後的分析表，不對外"},
   {key: "n_synthetic", title: "PETsARD 合成資料", note: "分析時使用，不含真實個人"},
-  {key: "n_published", title: "差分隱私發布版", note: "對外發布的熱區地圖"},
+  {key: "n_published", title: "差分隱私發布版", note: "真實交集加 Laplace 雜訊，對外發布"},
 ];
 const LON = __LON__, LAT = __LAT__, W = 300, PAD = 12;
 const kx = Math.cos(23.6 * Math.PI / 180);

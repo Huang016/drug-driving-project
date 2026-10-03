@@ -1,0 +1,18 @@
+id: drug-driving-wide-v3
+name: "A+B+C wide table (one row per person in A∩B∩C), v3"
+attributes:
+  event_month:        {type: integer, category: true, description: "A event_date -> month"}
+  weekday:            {type: string, category: true, description: "A event_date -> 週一..週日"}
+  event_hour:         {type: integer, category: true, description: "A event_hour 0-23"}
+  county:             {type: string, category: true, description: "A county"}
+  vehicle_group:      {type: string, category: true, description: "A vehicle_type -> 機車/小客車/貨車/大客車"}
+  age_group:          {type: string, category: true}
+  gender:             {type: string, category: true}
+  accident_class:     {type: string, category: true, description: "A1 (death) / A2 (injury only), official data"}
+  injury_count:       {type: integer, category: true, description: "official injuries, 4 = 4 or more"}
+  specimen_type:      {type: string, category: true}
+  positive_substance: {type: string, category: true}
+  test_offset_days:   {type: integer, category: true, description: "B test_date minus A event_date (0-3)"}
+  recidivism_count:   {type: integer, category: true}
+  sanction_lag:       {type: string, category: true, description: "C sanction_date minus A event_date, day range"}
+  sanction:           {type: string, category: true, description: "§35 sanction: 吊扣2年/3年/4年, 吊銷3年, 吊銷終身"}

@@ -1,0 +1,12 @@
+{
+  "pairs": 105,
+  "mean": 0.95,
+  "min": 0.83,
+  "worst_5": {
+    "event_hour × county": 0.83,
+    "event_month × event_hour": 0.861,
+    "event_month × county": 0.868,
+    "weekday × event_hour": 0.873,
+    "weekday × county": 0.896
+  }
+}
