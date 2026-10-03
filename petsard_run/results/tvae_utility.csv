@@ -1,0 +1,5 @@
+full_expt_name,Splitter,Synthesizer,Evaluator,utility_metric,utility_ori,utility_syn,utility_diff
+Splitter[external_split_[1-1]]_Synthesizer[external_data]_Evaluator[global],external_split_[1-1],external_data,[global],mcc,0.05,0.0,-0.05
+Splitter[external_split_[1-1]]_Synthesizer[external_data]_Evaluator[global],external_split_[1-1],external_data,[global],f1_score,0.01,0.0,-0.01
+Splitter[external_split_[1-1]]_Synthesizer[external_data]_Evaluator[global],external_split_[1-1],external_data,[global],roc_auc,0.75,0.5,-0.25
+Splitter[external_split_[1-1]]_Synthesizer[external_data]_Evaluator[global],external_split_[1-1],external_data,[global],pr_auc,0.14,0.52,0.39

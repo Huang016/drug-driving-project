@@ -1,0 +1,70 @@
+
+════════════════════════════════════════════════════════════
+ 為什麼需要這套流程：原始資料的重新識別風險
+════════════════════════════════════════════════════════════
+  原始警政資料 403,083 筆
+  只知道「日期＋時段＋鄉鎮」→ 61.3% 的人是唯一的一筆
+  只知道「日期＋時段＋鄉鎮＋年齡層＋性別」→ 95.0% 的人是唯一的一筆
+
+════════════════════════════════════════════════════════════
+ 階段一、二：PSI 找交集（ECDH 盲化）＋ 只傳必要欄位，全程 ML-KEM 加密
+════════════════════════════════════════════════════════════
+【準備】各方產生自己的 ML-KEM-768 金鑰、ML-DSA-65 簽章金鑰與 PSI 私鑰
+  警政A：403,088 筆身分識別碼
+  檢驗B：50,000 筆身分識別碼
+  監理C：11,756 筆身分識別碼
+
+【階段一】PSI：三方輪流盲化，協調者比對三重盲化值
+  警政A → 檢驗B  [psi-A-blind1]  12,903,241 bytes  e11cde02ab1b22fd642e11e0…
+  檢驗B → 監理C  [psi-A-blind2]  12,903,241 bytes  32102f3ce376b359ef4ef42f…
+  監理C → 警政A  [psi-A-blind3]  12,903,241 bytes  3f140cf992589757d0a7df55…
+  檢驗B → 監理C  [psi-B-blind1]  1,604,425 bytes  41f777855476992b54376995…
+  監理C → 警政A  [psi-B-blind2]  1,604,425 bytes  11f9ae953ea2a99656159a15…
+  警政A → 檢驗B  [psi-B-blind3]  1,604,425 bytes  9bbf6e97e66a905c5ddb190b…
+  監理C → 警政A  [psi-C-blind1]    380,617 bytes  212c091e496e10acbc60072f…
+  警政A → 檢驗B  [psi-C-blind2]    380,617 bytes  400113a60c37ec45f6cc84ff…
+  檢驗B → 監理C  [psi-C-blind3]    380,617 bytes  ac5d91293d4eb1b0e819c045…
+  警政A → 協調者  [psi-anon-ids]  27,414,409 bytes  c303863bcf6e4498be936cd2…
+  檢驗B → 協調者  [psi-anon-ids]  3,404,425 bytes  04cbfa351bc62dd7b8a13a07…
+  監理C → 協調者  [psi-anon-ids]    803,833 bytes  b8ba659cf621e1dc61664299…
+  → 三方交集：5,878 人
+
+【階段二】只傳交集中的人需要的欄位
+  協調者 → 警政A  [intersection]    404,129 bytes  2be7c2202bf426a9b50ea0a9…
+  警政A → 協調者  [fields]    508,068 bytes  3e7b5a6fb6da6e82c2634cd2…
+  協調者 → 檢驗B  [intersection]    404,129 bytes  912887618b8ded29cacbdbb9…
+  檢驗B → 協調者  [fields]    404,153 bytes  834009d9eabf2b5af20e685c…
+  協調者 → 監理C  [intersection]    404,129 bytes  66251a8ab9de1da26801e381…
+  監理C → 協調者  [fields]    404,155 bytes  658e8029c7cf45a7357477e0…
+  → 協調者合併出分析表：5,878 列，欄位 ['anon_id', 'county', 'district', 'severity_score', 'recidivism_count']
+  → 已寫入 hotspot_pipeline\analysis_table.csv
+
+【檢查】線路上的內容
+  傳輸 18 則訊息，共 78,816,279 bytes，全部是 ML-KEM-768 + AES-256-GCM 密文，並附 ML-DSA-65 簽章
+  在所有密文中搜尋原始身分識別碼：找到 0 個
+
+════════════════════════════════════════════════════════════
+ 階段三：PETsARD 產生合成資料並評估
+════════════════════════════════════════════════════════════
+train 4702 rows, control 1176 rows, columns ['location', 'severity_score', 'recidivism_count']
+copula synthesize: 4702 rows
+copula privacy+fidelity: exit=0
+copula release table: 5878 rows
+  保真度　總分：0.97
+  保真度　單欄分布：0.97
+  保真度　欄位間關係：nan
+  隱私　單挑風險：0.31　（建議 < 0.09，超過）
+  隱私　連結風險：0.00　（建議 < 0.09，符合）
+  隱私　推論風險：0.00　（建議 < 0.09，符合）
+
+════════════════════════════════════════════════════════════
+ 階段四、五：鄉鎮熱區統計，發布前加差分隱私（ε = 1）
+════════════════════════════════════════════════════════════
+hotspot_eps1.csv: epsilon 1, 367 districts, 228 shown (noisy count >= 5)
+  real vs synthetic count correlation:  0.986
+  real vs published count correlation:  0.986
+  top-10 districts kept after DP: 10 of 10
+  districts shown that have nobody in the real table: 3
+hotspot_map.html: 367 districts, 228 shown in the published map
+
+完成。熱區地圖：hotspot_pipeline/results/hotspot_map.html

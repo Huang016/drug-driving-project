@@ -352,3 +352,5 @@ bash run_demo.sh --pause 2  # 換一個隱私預算 ε（預設 1）
 - **公鑰要靠可信管道交換。** 簽章只能證明訊息來自持有某把私鑰的人，公鑰如果一開始就被掉包，簽章也沒用。
 - **`kyber-py` 和 `dilithium-py` 是純 Python 參考實作**，未防護時序側通道，適合示範，不適合正式部署。
 - **熱區圖上有 3 個鄉鎮其實 0 人卻顯示出來**，這是雜訊造成的；人數少的鄉鎮排名不可信。
+
+原始報表：`hotspot_pipeline/results/`（本次執行紀錄 `run_demo_log.txt`、PETsARD 評估、熱區 CSV 與地圖）、`petsard_run/results/`（原始 A 的 Copula、TVAE 評估與 Utility）。
