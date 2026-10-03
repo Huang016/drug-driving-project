@@ -354,3 +354,55 @@ bash run_demo.sh --pause 2  # 換一個隱私預算 ε（預設 1）
 - **熱區圖上有 3 個鄉鎮其實 0 人卻顯示出來**，這是雜訊造成的；人數少的鄉鎮排名不可信。
 
 原始報表：`hotspot_pipeline/results/`（本次執行紀錄 `run_demo_log.txt`、PETsARD 評估、熱區 CSV 與地圖）、`petsard_run/results/`（原始 A 的 Copula、TVAE 評估與 Utility）。
+
+---
+
+# 第五部分：毒駕熱區地圖網站（`web/`）
+
+Google Maps 網站，三層往下點：**全台（縣市）→ 縣市（鄉鎮）→ 鄉鎮（500m 網格熱點＋街景）**。顏色是「每萬件傷亡事故中的毒駕事故數」，分母是公開的 114 年傷亡事故件數。
+
+## 只想看網站
+
+直接開 https://huang016.github.io/drug-driving-project/ （main 分支的 `web/` 有更新時，`.github/workflows/pages.yml` 會自動重新部署）。
+
+## 在自己電腦上打開、修改
+
+1. 下載專案：`git clone https://github.com/Huang016/drug-driving-project.git`（或在 GitHub 頁面按 Code → Download ZIP）。
+2. 建立金鑰檔：把 `web/config.example.js` 複製成 `web/config.js`（注意檔名只有一個點），填入金鑰。金鑰請向組員私下索取，**不要 commit**，`config.js` 已列在 `web/.gitignore`。
+3. 在專案資料夾執行 `python -m http.server 8000 -d web`，打開 http://localhost:8000。不能直接雙擊 `index.html`。
+4. 修改 `web/` 裡的檔案後重新整理瀏覽器即可看到結果；改完開新分支、push、發 Pull Request。
+
+| 想改什麼 | 改哪裡 |
+|---|---|
+| 版面、顏色、字體 | `web/style.css` |
+| 地圖行為、文字、街景 | `web/app.js` |
+| 隱私參數（ε、門檻）、資料內容 | `hotspot_pipeline/build_web_data.py`，改完重跑 `python build_web_data.py` |
+
+Google Maps 金鑰需在 Google Cloud Console 啟用 **Maps JavaScript API**，並限制網站為 `http://localhost:8000/*` 與 `https://huang016.github.io/*`。
+
+網址會記住位置（例如 `#新北市/板橋區`），可以直接分享或用瀏覽器上一頁返回。
+
+## 網站資料（`hotspot_pipeline/build_web_data.py`，`run_demo.sh` 的階段六）
+
+| 檔案 | 內容 |
+|---|---|
+| `web/data/regions.json` | 縣市、鄉鎮的加噪毒駕件數、比例、平均嚴重度、再犯比例 |
+| `web/data/cells.json` | 加噪後 ≥ 3 件的 500m 網格中心與件數 |
+| `web/data/towns.topo.json` | 鄉鎮界線（[taiwan-atlas](https://www.npmjs.com/package/taiwan-atlas)，名稱統一為「臺」） |
+
+- **鄉鎮層級**直接呼叫 `hotspot_dp.py`（同一個 seed、同一個 ε），數字與 `results/hotspot_eps1.csv` 完全相同；縣市是鄉鎮加噪值的加總（後處理，不另花預算），少於 5 件同樣不公開。
+- **500m 網格**：精確座標轉成網格；所有「有任何事故」的網格（29,423 格，來自公開事故資料）都加 Laplace 雜訊，只公開加噪後 ≥ 3 件的網格，所以「網格有沒有出現」本身不會洩漏毒駕位置。網格另用 ε = 2，**總預算 ε = 1 + 2 = 3**（同一人同時計入鄉鎮與網格，循序組合）。
+- **街景**取網格中心 250m 內最近的 Google 街景，不是事故的精確地點。
+
+執行結果（ε 鄉鎮 1、網格 2）：
+
+| 項目 | 結果 |
+|---|---|
+| 鄉鎮 | 367 個，228 個公開 |
+| 網格 | 真實有毒駕的 3,892 格，其中 446 格 ≥ 3 件；公開 680 格，388 格真實 ≥ 3 件，86 格（13%）其實 0 件，是雜訊造成 |
+| 網格 ε = 1 時 | 公開 1,928 格，1,078 格其實 0 件，雜訊太多，所以改用 2 |
+
+**限制**
+- 網格需要每個人的網格編號。PSI 流程中 A 目前只送縣市與鄉鎮（`psi_pqc/institution.py`），所以網格暫時從 `data/wide/wide_table_full.csv` 計算；正式流程應改由 A 送出網格編號（不送經緯度）。
+- Dataset A 的鄉鎮欄位把平鎮區、前鎮區、左鎮區、新市區截成「平鎮、前鎮、左鎮、新市」，`build_web_data.py` 用對照表修正後才對得上地圖界線。
+- 板橋區有一格 66 件，遠高於其他網格（第二高 13 件），可能是事故座標被定位到同一個點，值得回頭檢查原始資料。
