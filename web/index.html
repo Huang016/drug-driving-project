@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>毒駕熱區地圖</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <header>
+      <h1>毒駕熱區地圖</h1>
+      <p class="sub">每萬件傷亡事故中的毒駕事故數（差分隱私發布）</p>
+    </header>
+    <nav class="crumbs" id="crumbs" aria-label="目前位置"></nav>
+    <section class="headline" id="headline"></section>
+    <section class="legend" id="legend" aria-label="圖例"></section>
+    <section class="list-wrap">
+      <h2 id="list-title"></h2>
+      <ol class="list" id="list"></ol>
+    </section>
+    <details class="privacy" id="privacy">
+      <summary>資料怎麼保護隱私？</summary>
+      <div id="privacy-body"></div>
+    </details>
+  </aside>
+
+  <main class="map-wrap">
+    <div id="map" role="application" aria-label="台灣毒駕熱區地圖"></div>
+    <div class="tip" id="tip" hidden></div>
+    <section class="sv" id="sv" hidden aria-label="街景">
+      <header>
+        <div>
+          <b id="sv-title"></b>
+          <span id="sv-sub"></span>
+        </div>
+        <button type="button" id="sv-close" aria-label="關閉街景">✕</button>
+      </header>
+      <div id="pano"></div>
+      <footer id="sv-foot"></footer>
+    </section>
+    <div class="notice" id="notice" hidden></div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<script src="config.js" onerror="window.APP_CONFIG_MISSING = true"></script>
+<script src="app.js"></script>
+</body>
+</html>

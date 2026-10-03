@@ -1,0 +1,41 @@
+# 把 web/ 部署到 GitHub Pages：https://huang016.github.io/drug-driving-project/
+# 需要 repo 擁有者先設定：
+#   Settings → Pages → Source 選「GitHub Actions」
+#   Settings → Secrets and variables → Actions → 新增 MAPS_API_KEY（Google Maps 金鑰）
+name: Deploy web to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write web/config.js from the MAPS_API_KEY secret
+        env:
+          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
+        run: |
+          if [ -z "$MAPS_API_KEY" ]; then echo "::warning::MAPS_API_KEY 未設定，網站會顯示金鑰設定提示"; fi
+          printf 'window.APP_CONFIG = { googleMapsApiKey: "%s" };\n' "$MAPS_API_KEY" > web/config.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

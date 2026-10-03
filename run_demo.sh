@@ -31,4 +31,7 @@ stage "階段四、五：鄉鎮熱區統計，發布前加差分隱私（ε = $e
   && "$PY" make_hotspot_map.py "out_$METHOD_NAME/hotspot_eps$epsilon.csv" \
   && mkdir -p results && cp "out_$METHOD_NAME/hotspot_eps$epsilon.csv" "out_$METHOD_NAME/hotspot_map.html" results/) || exit 1
 
-printf '\n完成。熱區地圖：hotspot_pipeline/results/hotspot_map.html\n'
+stage "階段六：產生 Google Maps 網站資料（500m 網格另加差分隱私）"
+(cd hotspot_pipeline && "$PY" build_web_data.py "$epsilon") || exit 1
+
+printf '\n完成。熱區地圖：hotspot_pipeline/results/hotspot_map.html\n網站：python -m http.server 8000 -d web，再開 http://localhost:8000\n'
