@@ -1,6 +1,6 @@
 // 毒駕熱區地圖：全台（縣市）→ 縣市（鄉鎮）→ 鄉鎮（500m 網格 + 街景）
 // 資料由 hotspot_pipeline/build_web_data.py 產生。毒駕事故是差分隱私發布後的數字；
-// 一般事故是公開的 114 年傷亡事故資料，不加雜訊，熱點細到 100m（約一個路口或一小段路）。
+// 一般事故是公開的 114 年傷亡事故資料，不加雜訊，熱點細到半徑 30m（約一個路口）。
 
 const RAMP = ["#fde0d2", "#f9b293", "#f07f56", "#d9512e", "#a8321b"]; // one hue, light -> dark
 const WITHHELD = "#d9d8d3";
@@ -116,7 +116,7 @@ function render() {
   document.querySelectorAll(".modes button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
   $("rank-by").hidden = !all;
   $("rank-select").value = state.rank;
-  $("subtitle").textContent = all ? "114 年傷亡道路交通事故與 100m 事故熱點（公開資料）" : "每萬件傷亡事故中的毒駕事故數（差分隱私發布）";
+  $("subtitle").textContent = all ? "114 年傷亡道路交通事故與路口事故熱點（公開資料）" : "每萬件傷亡事故中的毒駕事故數（差分隱私發布）";
 
   layers.towns.forEach((f) => layers.towns.remove(f));
   layers.cells.forEach((f) => layers.cells.remove(f));
@@ -266,7 +266,7 @@ async function openSpot(s) {
     sv.setVisible(true);
     const ll = data.location.latLng;
     const road = (await roadName(s)) || cleanRoad(data.location.description);
-    $("sv-foot").innerHTML = `${road ? `<b>${road}</b>・` : ""}熱點是 ${general.meta.spotMeters}m 範圍內事故的平均位置。${s.stacked ? "多數事故座標相同，可能是登記地址而非事故地點。" : ""}${data.imageDate ? `拍攝時間 ${data.imageDate}・` : ""}<a href="https://www.google.com/maps/@?api=1&map_action=pano&pano=${encodeURIComponent(data.location.pano)}&viewpoint=${ll.lat()},${ll.lng()}" target="_blank" rel="noopener">在 Google 地圖開啟</a>`;
+    $("sv-foot").innerHTML = `${road ? `<b>${road}</b>・` : ""}熱點是 半徑 ${general.meta.spotRadius}m 內事故的中心位置。${s.stacked ? "多數事故座標相同，可能是登記地址而非事故地點。" : ""}${data.imageDate ? `拍攝時間 ${data.imageDate}・` : ""}<a href="https://www.google.com/maps/@?api=1&map_action=pano&pano=${encodeURIComponent(data.location.pano)}&viewpoint=${ll.lat()},${ll.lng()}" target="_blank" rel="noopener">在 Google 地圖開啟</a>`;
   } catch {
     $("sv-foot").textContent = "熱點 60m 內沒有 Google 街景。";
   }
@@ -394,7 +394,7 @@ function renderLegend() {
     $("legend").innerHTML = `<h2>${town ? "所在鄉鎮" : state.county ? "各鄉鎮市區" : "各縣市"}傷亡事故件數</h2>
       <div class="bar">${RAMP.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
       <div class="ticks">${br.map((b) => `<span>${fmt(b)}</span>`).join("")}<span></span></div>
-      ${state.county ? `<div class="spot-key"><i>1</i>事故熱點（${general.meta.spotMeters}m 範圍，約一個路口或一小段路），數字是排名</div>` : `<div class="spot-key"><i>1</i>點進縣市或鄉鎮，顯示事故熱點</div>`}`;
+      ${state.county ? `<div class="spot-key"><i>1</i>事故熱點（半徑 ${general.meta.spotRadius}m，約一個路口），數字是排名</div>` : `<div class="spot-key"><i>1</i>點進縣市或鄉鎮，顯示事故熱點</div>`}`;
     return;
   }
   const br = town ? CELL_BREAKS : state.county ? townBreaks : countyBreaks;
@@ -451,7 +451,7 @@ function renderPrivacy() {
     $("privacy").querySelector("summary").textContent = "一般事故的資料從哪來？";
     $("privacy-body").innerHTML = `<ol>
       <li>來源是警政署公開的 <b>114 年傷亡道路交通事故資料</b>，本來就是公開資料，所以這一層不加雜訊。</li>
-      <li>事故熱點：把事故座標切成 <b>${general.meta.spotMeters}m × ${general.meta.spotMeters}m</b> 的小格（約一個路口或一小段路），每個縣市與鄉鎮各列出前 ${general.meta.spotsPerArea} 名，圓圈畫在格內事故的平均位置。</li>
+      <li>事故熱點：從事故最密集的位置開始，把 <b>半徑 ${general.meta.spotRadius}m</b> 內的事故算成一個熱點（約一個路口），每個縣市與鄉鎮各列出前 ${general.meta.spotsPerArea} 名，圓圈畫在熱點內事故的中心位置。</li>
       <li>路名取自熱點附近最近的 Google 街景，不一定是事故登記的路名。</li>
       <li>有 ${fmt(general.meta.placeholder)} 件事故的座標不可靠（例如落在登記鄉鎮之外、或許多鄉鎮的事故疊在同一點），不列入熱點，但仍計入件數。</li>
     </ol>

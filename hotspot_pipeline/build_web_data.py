@@ -29,15 +29,16 @@ built from data/wide/wide_table_full.csv, the coordinator's merged table.
 General accidents (the "一般事故" view)
   Every casualty accident in A is public open data, so these figures carry no
   noise. Per county and district: accident count, A1 count, deaths, injuries,
-  the busiest hours and the vehicle mix. Spots: accidents are pooled into
-  100 m cells (about one intersection or a short stretch of road) and the top
-  SPOTS_PER_AREA cells per county and per district are published for each
-  ranking (accidents, deaths, injuries), placed at the mean accident position.
+  the busiest hours and the vehicle mix. Spots: accidents are pooled within
+  SPOT_RADIUS_M of the densest points (about one junction, see
+  junction_clusters) and the top SPOTS_PER_AREA spots per county and per
+  district are published for each ranking (accidents, deaths, injuries),
+  placed at the median accident position.
   Some accidents carry a placeholder position (whole-minute coordinates such as
   24.0, 121.0, or a city-centre point shared by accidents from far-away
   districts); an accident is used for spots only if it lies inside, or within
   SPOT_TOLERANCE_M of, the district it is registered in, and its 100 m cell
-  does not hold accidents from MIXED_DISTRICTS or more districts.
+  (SPOT_M) does not hold accidents from MIXED_DISTRICTS or more districts.
 """
 import json
 import math
@@ -46,6 +47,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.spatial import cKDTree
 
 from hotspot_dp import DEFAULT_EPSILON, MIN_PUBLISHED_COUNT, SEED, add_noise, district_stats, public_districts
 
@@ -63,12 +65,13 @@ CELL_M = 500
 CELL_LAT = CELL_M / 111_320
 CELL_LON = CELL_M / (111_320 * math.cos(math.radians(23.7)))  # one width for all of Taiwan
 
-SPOT_M = 100
+SPOT_RADIUS_M = 30  # about one junction; 50 m already merges neighbouring junctions in Taipei
+SPOT_M = 100  # cell used only to find placeholder points (see MIXED_DISTRICTS)
 SPOT_LAT = SPOT_M / 111_320
 SPOT_LON = SPOT_M / (111_320 * math.cos(math.radians(23.7)))
 SPOT_TOLERANCE_M = 300  # the town boundaries are simplified, so a real position can fall just outside
 MIXED_DISTRICTS = 5
-STACKED_MIN, STACKED_POINTS = 30, 5  # >= 30 accidents on <= 5 exact positions
+STACKED_MIN, STACKED_POINTS = 15, 3  # >= 15 accidents on <= 3 exact positions
 SPOTS_PER_AREA = 10
 SPOT_RANKINGS = {"n": "件數", "deaths": "死亡人數", "injuries": "受傷人數"}
 
@@ -217,6 +220,24 @@ def top_spots(cells: pd.DataFrame) -> dict:
     return out
 
 
+def junction_clusters(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+    """Spot id per accident. The densest accident not yet taken becomes a spot and takes every
+    untaken accident within SPOT_RADIUS_M; repeat. Spots so centre on junctions instead of
+    being split by grid lines."""
+    xy = np.column_stack([lon * 111_320 * math.cos(math.radians(23.7)), lat * 111_320])
+    tree = cKDTree(xy)
+    density = tree.query_ball_point(xy, SPOT_RADIUS_M, return_length=True)
+    spot = np.full(len(xy), -1)
+    k = 0
+    for i in np.argsort(-density, kind="stable"):
+        if spot[i] >= 0:
+            continue
+        near = np.asarray(tree.query_ball_point(xy[i], SPOT_RADIUS_M))
+        spot[near[spot[near] < 0]] = k
+        k += 1
+    return spot
+
+
 def general_release(acc: pd.DataFrame, rings: dict):
     profiles = {"nation": area_profile(acc), "counties": {}}
     for c, g in acc.groupby("county"):
@@ -227,14 +248,15 @@ def general_release(acc: pd.DataFrame, rings: dict):
     # a placeholder point collects accidents registered all over the city; a real junction on a border has two or three
     mixed = acc.groupby(["si", "sj"])["district"].transform("nunique") >= MIXED_DISTRICTS
     ok = located(acc.dropna(subset=["district"]), rings).reindex(acc.index, fill_value=False) & ~mixed
-    pos = acc[ok]
-    cells = (pos.groupby(["si", "sj"])
+    pos = acc[ok].reset_index(drop=True)
+    pos["spot"] = junction_clusters(pos["lat_raw"].to_numpy(), pos["lon_raw"].to_numpy())
+    cells = (pos.groupby("spot")
              .agg(n=("lat_raw", "size"), deaths=("death_count", "sum"), injuries=("injury_count", "sum"),
-                  lat=("lat_raw", "mean"), lng=("lon_raw", "mean"),
+                  lat=("lat_raw", "median"), lng=("lon_raw", "median"),
                   county=("county", lambda s: s.mode().iat[0]), district=("district", lambda s: s.mode().iat[0]))
              .reset_index())
-    points = pos.drop_duplicates(["si", "sj", "lat_raw", "lon_raw"]).groupby(["si", "sj"]).size().rename("points")
-    cells = cells.join(points, on=["si", "sj"])
+    points = pos.drop_duplicates(["spot", "lat_raw", "lon_raw"]).groupby("spot").size().rename("points")
+    cells = cells.join(points, on="spot")
     # many accidents on one or two exact points: probably a recorded address (a station, a landmark), not where it happened
     cells["stacked"] = (cells["n"] >= STACKED_MIN) & (cells["points"] <= STACKED_POINTS)
     spots = {"county": {c: top_spots(g) for c, g in cells.groupby("county")},
@@ -304,7 +326,7 @@ def main():
     }
     general_meta = {
         "source": "114 年（2025）傷亡道路交通事故（公開資料，未加雜訊）",
-        "spotMeters": SPOT_M,
+        "spotRadius": SPOT_RADIUS_M,
         "spotsPerArea": SPOTS_PER_AREA,
         "rankings": SPOT_RANKINGS,
         "placeholder": spot_report["placeholder"],
@@ -322,7 +344,7 @@ def main():
     print(f"        published {grid['published']}: {grid['published_real_ge_min']} really >= {GRID_MIN_COUNT}, {grid['published_no_case']} with no real case")
     print(f"  general: {spot_report['accidents']} accidents, {spot_report['located']} placed in their own district, "
           f"{spot_report['placeholder']} left out of the spots (placeholder position)")
-    print(f"           {spot_report['cells']} {SPOT_M} m cells; busiest: {spot_report['top']}")
+    print(f"           {spot_report['cells']} spots of {SPOT_RADIUS_M} m radius; busiest: {spot_report['top']}")
 
 
 if __name__ == "__main__":
