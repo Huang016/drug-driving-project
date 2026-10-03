@@ -25,6 +25,19 @@ District level
 The grid needs each person's cell. In the PSI flow A only sends county and
 district (psi_pqc/institution.py); until A also sends the cell id, the grid is
 built from data/wide/wide_table_full.csv, the coordinator's merged table.
+
+General accidents (the "一般事故" view)
+  Every casualty accident in A is public open data, so these figures carry no
+  noise. Per county and district: accident count, A1 count, deaths, injuries,
+  the busiest hours and the vehicle mix. Spots: accidents are pooled into
+  100 m cells (about one intersection or a short stretch of road) and the top
+  SPOTS_PER_AREA cells per county and per district are published for each
+  ranking (accidents, deaths, injuries), placed at the mean accident position.
+  Some accidents carry a placeholder position (whole-minute coordinates such as
+  24.0, 121.0, or a city-centre point shared by accidents from far-away
+  districts); an accident is used for spots only if it lies inside, or within
+  SPOT_TOLERANCE_M of, the district it is registered in, and its 100 m cell
+  does not hold accidents from MIXED_DISTRICTS or more districts.
 """
 import json
 import math
@@ -49,6 +62,15 @@ GRID_MIN_COUNT = 3
 CELL_M = 500
 CELL_LAT = CELL_M / 111_320
 CELL_LON = CELL_M / (111_320 * math.cos(math.radians(23.7)))  # one width for all of Taiwan
+
+SPOT_M = 100
+SPOT_LAT = SPOT_M / 111_320
+SPOT_LON = SPOT_M / (111_320 * math.cos(math.radians(23.7)))
+SPOT_TOLERANCE_M = 300  # the town boundaries are simplified, so a real position can fall just outside
+MIXED_DISTRICTS = 5
+STACKED_MIN, STACKED_POINTS = 30, 5  # >= 30 accidents on <= 5 exact positions
+SPOTS_PER_AREA = 10
+SPOT_RANKINGS = {"n": "件數", "deaths": "死亡人數", "injuries": "受傷人數"}
 
 # Dataset A cuts these four names at the first 鎮/市 (e.g. 平鎮區 -> 平鎮)
 DISTRICT_FIX = {("桃園市", "平鎮"): "平鎮區", ("臺南市", "左鎮"): "左鎮區",
@@ -117,6 +139,111 @@ def grid_release(accidents: pd.DataFrame, epsilon: float):
     return cells, report
 
 
+def town_rings(topo: dict) -> dict:
+    """(county, town) -> list of rings, each an (n, 2) array of lon/lat, decoded from the topojson."""
+    sx, sy = topo["transform"]["scale"]
+    tx, ty = topo["transform"]["translate"]
+    arcs = []
+    for arc in topo["arcs"]:
+        q = np.cumsum(np.array(arc, dtype=float), axis=0)
+        arcs.append(np.column_stack([q[:, 0] * sx + tx, q[:, 1] * sy + ty]))
+
+    def ring(ids):
+        return np.vstack([arcs[i] if i >= 0 else arcs[~i][::-1] for i in ids])
+
+    out = {}
+    for g in topo["objects"]["towns"]["geometries"]:
+        polygons = g["arcs"] if g["type"] == "MultiPolygon" else [g["arcs"]]
+        key = (norm(g["properties"]["COUNTYNAME"]), norm(g["properties"]["TOWNNAME"]))
+        out.setdefault(key, []).extend(ring(r) for poly in polygons for r in poly)
+    return out
+
+
+def near_own_town(lon: np.ndarray, lat: np.ndarray, rings: list) -> np.ndarray:
+    """Inside the rings (even-odd rule), or within SPOT_TOLERANCE_M of their edge."""
+    inside = np.zeros(len(lon), dtype=bool)
+    dist = np.full(len(lon), np.inf)
+    kx = 111_320 * math.cos(math.radians(23.7))
+    for r in rings:
+        x1, y1, x2, y2 = r[:-1, 0], r[:-1, 1], r[1:, 0], r[1:, 1]
+        for a in range(0, len(lon), 2000):  # chunks keep the point x edge matrix small
+            px, py = lon[a:a + 2000, None], lat[a:a + 2000, None]
+            crosses = ((y1 > py) != (y2 > py)) & (px < (x2 - x1) * (py - y1) / np.where(y2 == y1, 1e-12, y2 - y1) + x1)
+            inside[a:a + 2000] ^= (crosses.sum(axis=1) % 2).astype(bool)
+            dx, dy = (x2 - x1) * kx, (y2 - y1) * 111_320
+            qx, qy = (px - x1) * kx, (py - y1) * 111_320
+            t = np.clip((qx * dx + qy * dy) / np.where(dx * dx + dy * dy == 0, 1, dx * dx + dy * dy), 0, 1)
+            d = np.hypot(qx - t * dx, qy - t * dy).min(axis=1)
+            dist[a:a + 2000] = np.minimum(dist[a:a + 2000], d)
+    return inside | (dist <= SPOT_TOLERANCE_M)
+
+
+def located(acc: pd.DataFrame, rings: dict) -> pd.Series:
+    ok = pd.Series(False, index=acc.index)
+    for (c, d), idx in acc.groupby(["county", "district"]).groups.items():
+        if (c, d) in rings:
+            sub = acc.loc[idx]
+            ok.loc[idx] = near_own_town(sub["lon_raw"].to_numpy(), sub["lat_raw"].to_numpy(), rings[(c, d)])
+    return ok
+
+
+def vehicle_group(vehicle_type: pd.Series) -> pd.Series:
+    kind = vehicle_type.str.split("-").str[0]
+    return kind.replace({"小客車(含客、貨兩用)": "小客車", "人": "行人", "慢車": "自行車等慢車",
+                         "曳引車": "大型車", "半聯結車": "大型車", "全聯結車": "大型車", "大貨車": "大型車", "大客車": "大型車"})
+
+
+def area_profile(g: pd.DataFrame) -> dict:
+    hours = g["event_hour"].value_counts()
+    vehicles = vehicle_group(g["vehicle_type"]).value_counts(normalize=True)
+    return {
+        "total": int(len(g)),
+        "a1": int((g["accident_class"] == "A1").sum()),
+        "deaths": int(g["death_count"].sum()),
+        "injuries": int(g["injury_count"].sum()),
+        "peakHours": [int(h) for h in hours.nlargest(3).index],
+        "vehicles": [[k, round(float(v), 3)] for k, v in vehicles.head(3).items()],
+    }
+
+
+def top_spots(cells: pd.DataFrame) -> dict:
+    """The SPOTS_PER_AREA cells for each ranking, as [lat, lng, accidents, deaths, injuries, stacked 0/1]."""
+    out = {}
+    for key in SPOT_RANKINGS:
+        order = [key] + [k for k in ("n", "injuries", "deaths") if k != key]
+        best = cells[cells[key] > 0].sort_values(order, ascending=False, kind="stable").head(SPOTS_PER_AREA)
+        out[key] = [[round(r.lat, 5), round(r.lng, 5), int(r.n), int(r.deaths), int(r.injuries), int(r.stacked)]
+                    for r in best.itertuples()]
+    return out
+
+
+def general_release(acc: pd.DataFrame, rings: dict):
+    profiles = {"nation": area_profile(acc), "counties": {}}
+    for c, g in acc.groupby("county"):
+        profiles["counties"][c] = {"profile": area_profile(g),
+                                   "towns": {d: area_profile(t) for d, t in g.groupby("district")}}
+
+    acc = acc.assign(si=np.floor(acc["lat_raw"] / SPOT_LAT).astype(int), sj=np.floor(acc["lon_raw"] / SPOT_LON).astype(int))
+    # a placeholder point collects accidents registered all over the city; a real junction on a border has two or three
+    mixed = acc.groupby(["si", "sj"])["district"].transform("nunique") >= MIXED_DISTRICTS
+    ok = located(acc.dropna(subset=["district"]), rings).reindex(acc.index, fill_value=False) & ~mixed
+    pos = acc[ok]
+    cells = (pos.groupby(["si", "sj"])
+             .agg(n=("lat_raw", "size"), deaths=("death_count", "sum"), injuries=("injury_count", "sum"),
+                  lat=("lat_raw", "mean"), lng=("lon_raw", "mean"),
+                  county=("county", lambda s: s.mode().iat[0]), district=("district", lambda s: s.mode().iat[0]))
+             .reset_index())
+    points = pos.drop_duplicates(["si", "sj", "lat_raw", "lon_raw"]).groupby(["si", "sj"]).size().rename("points")
+    cells = cells.join(points, on=["si", "sj"])
+    # many accidents on one or two exact points: probably a recorded address (a station, a landmark), not where it happened
+    cells["stacked"] = (cells["n"] >= STACKED_MIN) & (cells["points"] <= STACKED_POINTS)
+    spots = {"county": {c: top_spots(g) for c, g in cells.groupby("county")},
+             "town": {f"{c}|{d}": top_spots(g) for (c, d), g in cells.groupby(["county", "district"])}}
+    report = {"accidents": int(len(acc)), "located": int(ok.sum()), "placeholder": int(len(acc) - ok.sum()),
+              "cells": int(len(cells)), "top": cells.nlargest(5, "n")[["county", "district", "n"]].values.tolist()}
+    return profiles, spots, report
+
+
 def write_atlas():
     topo = json.loads(ATLAS.read_text(encoding="utf-8"))
     for layer in ("towns", "counties"):
@@ -131,12 +258,14 @@ def main():
     eps_d = float(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_EPSILON
     eps_g = float(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_GRID_EPSILON
 
-    accidents = fix_districts(pd.read_csv(ACCIDENTS, usecols=["county", "district", "lat_raw", "lon_raw"]))
+    accidents = fix_districts(pd.read_csv(ACCIDENTS, usecols=[
+        "county", "district", "lat_raw", "lon_raw", "event_hour", "vehicle_type", "accident_class", "death_count", "injury_count"]))
     totals = accidents.groupby(["county", "district"]).size()
 
     dist, real, source = district_release(eps_d)
     cells, grid = grid_release(accidents, eps_g)
     atlas_towns = write_atlas()
+    general, spots, spot_report = general_release(accidents, town_rings(json.loads((WEB_DATA / "towns.topo.json").read_text(encoding="utf-8"))))
 
     counties = {}
     for c, g in dist.groupby("county"):
@@ -173,16 +302,27 @@ def main():
         "cellMeters": CELL_M,
         "cellDeg": [CELL_LAT, CELL_LON],
     }
+    general_meta = {
+        "source": "114 年（2025）傷亡道路交通事故（公開資料，未加雜訊）",
+        "spotMeters": SPOT_M,
+        "spotsPerArea": SPOTS_PER_AREA,
+        "rankings": SPOT_RANKINGS,
+        "placeholder": spot_report["placeholder"],
+    }
     WEB_DATA.mkdir(parents=True, exist_ok=True)
     dump = lambda name, obj: (WEB_DATA / name).write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     dump("regions.json", {"meta": meta, "counties": counties})
     dump("cells.json", out_cells)
+    dump("general.json", {"meta": general_meta, "profiles": general, "spots": spots})
 
     data_towns = {(c, t) for c, v in counties.items() for t in v["towns"]}
     print(f"web/data: epsilon {eps_d:g} (district, from {source}) + {eps_g:g} (grid) = {eps_d + eps_g:g}")
     print(f"  districts: {len(data_towns)}, shown {int(dist['shown'].sum())}; not on the map: {sorted(data_towns - atlas_towns)}")
     print(f"  grid: {grid['candidates']} candidate cells, {grid['real_cells']} with a real case, {grid['real_ge_min']} with >= {GRID_MIN_COUNT}")
     print(f"        published {grid['published']}: {grid['published_real_ge_min']} really >= {GRID_MIN_COUNT}, {grid['published_no_case']} with no real case")
+    print(f"  general: {spot_report['accidents']} accidents, {spot_report['located']} placed in their own district, "
+          f"{spot_report['placeholder']} left out of the spots (placeholder position)")
+    print(f"           {spot_report['cells']} {SPOT_M} m cells; busiest: {spot_report['top']}")
 
 
 if __name__ == "__main__":

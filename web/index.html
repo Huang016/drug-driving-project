@@ -11,11 +11,22 @@
   <aside class="panel">
     <header>
       <h1>毒駕熱區地圖</h1>
-      <p class="sub">每萬件傷亡事故中的毒駕事故數（差分隱私發布）</p>
+      <p class="sub" id="subtitle">每萬件傷亡事故中的毒駕事故數（差分隱私發布）</p>
     </header>
+    <div class="modes" role="group" aria-label="要看哪一種事故">
+      <button type="button" data-mode="drug">毒駕事故</button>
+      <button type="button" data-mode="all">一般事故</button>
+    </div>
+    <label class="rank-by" id="rank-by" hidden>熱點排名依據
+      <select id="rank-select"></select>
+    </label>
     <nav class="crumbs" id="crumbs" aria-label="目前位置"></nav>
     <section class="headline" id="headline"></section>
     <section class="legend" id="legend" aria-label="圖例"></section>
+    <section class="list-wrap" id="spots-wrap" hidden>
+      <h2 id="spots-title"></h2>
+      <ol class="list" id="spots"></ol>
+    </section>
     <section class="list-wrap">
       <h2 id="list-title"></h2>
       <ol class="list" id="list"></ol>
