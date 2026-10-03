@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>毒駕熱區地圖</title>
-<link rel="stylesheet" href="style.css">
+<!-- 改了 style.css 或 app.js 就把 ?v= 後面的數字加一，瀏覽器才不會繼續用舊的快取 -->
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div class="app">
@@ -57,6 +58,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <script src="config.js" onerror="window.APP_CONFIG_MISSING = true"></script>
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

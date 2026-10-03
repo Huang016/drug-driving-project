@@ -25,7 +25,7 @@ const spotNames = new Map(); // "lat,lng" -> road name from the nearest street v
   loadGoogleMaps(key);
 
   const [regionsJson, cellsJson, topo, generalJson] = await Promise.all(
-    ["data/regions.json", "data/cells.json", "data/towns.topo.json", "data/general.json"].map((u) => fetch(u).then((r) => r.json())));
+    ["data/regions.json", "data/cells.json", "data/towns.topo.json", "data/general.json"].map((u) => fetch(u, { cache: "no-cache" }).then((r) => r.json())));
   regions = regionsJson.counties;
   meta = regionsJson.meta;
   cells = cellsJson;
