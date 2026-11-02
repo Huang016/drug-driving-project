@@ -78,6 +78,10 @@ h2 { font-size: 13px; color: var(--text-2); font-weight: 600; margin: 0 0 6px; }
 .list .detail { color: var(--text-2); font-size: 11px; }
 .legend .spot-key i.prevent { color: #ffffff; border-color: rgba(0,0,0,.35); }
 .legend .spot-key i.camera-dot { width: 8px; height: 8px; background: #7a7974; border: 1px solid #ffffff; margin: 0 4px; }
+.list .tags { display: flex; flex-wrap: wrap; gap: 3px; }
+.list .tags i { font-style: normal; font-size: 11px; padding: 0 5px; border-radius: 3px; background: #ece6f4; color: #4b2c73; }
+.sv .measures { margin: 4px 0 0; padding-left: 1.2em; color: var(--text); font-size: 12px; }
+.sv .measures li { margin-bottom: 2px; }
 .legend .criteria { color: var(--text-2); font-size: 12px; margin: 6px 0 0; }
 
 .list-wrap { flex: 1 0 auto; }

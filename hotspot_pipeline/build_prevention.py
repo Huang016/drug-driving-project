@@ -2,123 +2,124 @@
 
 Usage: python build_prevention.py   (after build_web_data.py, which writes cells.json)
 
-Two candidate lists, each a place to survey first, not a proven fix:
+The places are the drug-driving 500 m cells already published with differential
+privacy (cells.json); nothing here reads the drug-driving rows again, so the privacy
+budget is unchanged. Each cell is then described with public data only:
 
-  camera  Road segments (accidents pooled within SEGMENT_R m of the densest points)
-          with at least one fatal (A1) accident and no fixed speed camera within
-          CAMERA_R m, ranked by fatal accidents, deaths, then injuries. Cameras: NPA open data 7320,
-          fixed cameras only (no mobile or average-speed cameras, no freeways).
-  patrol  The drug-driving 500 m cells already published with differential privacy
-          in cells.json. Nothing here reads the drug-driving rows again, so the
-          privacy budget is unchanged; the busiest hours come from all public accidents
-          in the cell. The site ranks counties and districts by the published
-          regions.json counts and uses these cells inside a district.
+  - the public 114-year casualty accidents inside the cell (Dataset A positions,
+    cleaned as in build_web_data.py): count, deaths, injuries, night share, peak hours
+  - its busiest junction: accidents pooled within SPOT_RADIUS_M (junction_clusters)
+  - the fixed speed cameras inside the cell (NPA open data 7320)
 
-The accident positions are the public 114-year casualty accidents in Dataset A, cleaned
-as in build_web_data.py (placeholder and stacked positions are left out).
+A cell where most accidents sit on placeholder positions (city-centre points that
+collect accidents from many districts, see build_web_data.py) is left out: its count
+says where accidents were registered, not where they happened.
+
+Each remaining cell gets the measures its numbers point to (codes, worded on the site):
+
+  camera    no fixed speed camera in the cell               -> speed camera / speed reduction
+  junction  a junction with >= JUNCTION_MIN accidents       -> red-light camera, signal and junction redesign
+  night     night share >= NIGHT_FACTOR x the national one  -> night lighting, abnormal-driving monitoring
+  fatal     at least one death in the cell                  -> speed reduction first
+  patrol    always                                          -> checkpoints in the peak hours
+
+These are places to survey first, not proven fixes.
 """
 import json
-import math
 
 import numpy as np
 import pandas as pd
-from scipy.spatial import cKDTree
 
-from build_web_data import (ACCIDENTS, MIXED_DISTRICTS, ROOT, SPOT_LAT, SPOT_LON, STACKED_MIN, WEB_DATA,
-                            fix_districts, located, town_rings)
+from build_web_data import (ACCIDENTS, CELL_LAT, CELL_LON, MIXED_DISTRICTS, ROOT, SPOT_LAT, SPOT_LON, STACKED_MIN,
+                            WEB_DATA, fix_districts, junction_clusters, located, town_rings)
 
-EXTERNAL = ROOT / "data" / "external"
-CAMERAS = EXTERNAL / "speed_cameras.csv"  # 內政部警政署「測速執法設置點」(data.gov.tw 7320)
+CAMERAS = ROOT / "data" / "external" / "speed_cameras.csv"  # 內政部警政署「測速執法設置點」(data.gov.tw 7320)
 
-SEGMENT_R = 150
-CAMERA_R = 500
-CELL_R = 354  # radius around a 500 m cell centre that covers the cell
-KX = 111_320 * math.cos(math.radians(23.7))
-
-
-def xy(lat, lon) -> np.ndarray:
-    return np.column_stack([np.asarray(lon, dtype=float) * KX, np.asarray(lat, dtype=float) * 111_320])
+JUNCTION_MIN = 15
+NIGHT_FACTOR = 1.25
+NIGHT_MIN_ACCIDENTS = 30  # below this a night share is too unstable to flag
+NIGHT_HOURS = (22, 5)  # 22:00-05:59
+MIN_LOCATED_SHARE = 0.5  # below this the cell is mostly placeholder positions
 
 
-def clean_positions() -> pd.DataFrame:
-    acc = fix_districts(pd.read_csv(ACCIDENTS, usecols=[
-        "event_hour", "county", "district", "lat_raw", "lon_raw", "accident_class", "death_count", "injury_count"]))
-    acc = acc.dropna(subset=["district", "lat_raw", "lon_raw"]).reset_index(drop=True)
+def is_night(hour: pd.Series) -> pd.Series:
+    return (hour >= NIGHT_HOURS[0]) | (hour <= NIGHT_HOURS[1])
+
+
+def clean_positions(acc: pd.DataFrame) -> pd.DataFrame:
     rings = town_rings(json.loads((WEB_DATA / "towns.topo.json").read_text(encoding="utf-8")))
     cell = pd.DataFrame({"si": np.floor(acc["lat_raw"] / SPOT_LAT).astype(int), "sj": np.floor(acc["lon_raw"] / SPOT_LON).astype(int),
                          "district": acc["district"]})
     mixed = cell.groupby(["si", "sj"])["district"].transform("nunique") >= MIXED_DISTRICTS
     stacked = acc.groupby(["lat_raw", "lon_raw"])["county"].transform("size") >= STACKED_MIN
-    acc = acc[located(acc, rings) & ~mixed & ~stacked].reset_index(drop=True)
-    return acc
+    return acc[located(acc, rings) & ~mixed & ~stacked].reset_index(drop=True)
 
 
-def segments(acc: pd.DataFrame) -> np.ndarray:
-    """Same pooling as junction_clusters in build_web_data.py, at road-segment size."""
-    pts = xy(acc["lat_raw"], acc["lon_raw"])
-    tree = cKDTree(pts)
-    density = tree.query_ball_point(pts, SEGMENT_R, return_length=True)
-    seg = np.full(len(pts), -1)
-    k = 0
-    for i in np.argsort(-density, kind="stable"):
-        if seg[i] >= 0:
-            continue
-        near = np.asarray(tree.query_ball_point(pts[i], SEGMENT_R))
-        seg[near[seg[near] < 0]] = k
-        k += 1
-    return seg
+def in_cell(lat, lng, lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
+    return (np.abs(lats - lat) <= CELL_LAT / 2) & (np.abs(lons - lng) <= CELL_LON / 2)
 
 
-def camera_list(acc: pd.DataFrame, cam_tree: cKDTree) -> list:
-    acc = acc.assign(seg=segments(acc), a1=(acc["accident_class"] == "A1").astype(int),
-                     night=((acc["event_hour"] >= 22) | (acc["event_hour"] <= 5)).astype(int))
-    seg = (acc.groupby("seg").agg(n=("a1", "size"), a1=("a1", "sum"), deaths=("death_count", "sum"),
-                                  injuries=("injury_count", "sum"), night=("night", "mean"),
-                                  lat=("lat_raw", "median"), lng=("lon_raw", "median"),
-                                  county=("county", lambda s: s.mode().iat[0]),
-                                  district=("district", lambda s: s.mode().iat[0])))
-    seg = seg[seg["a1"] >= 1]
-    dist, _ = cam_tree.query(xy(seg["lat"], seg["lng"]))
-    seg = seg.assign(camera_m=dist.round().astype(int))
-    seg = seg[seg["camera_m"] > CAMERA_R].sort_values(["a1", "deaths", "injuries"], ascending=False)
-    return [{"county": r.county, "district": r.district, "lat": round(r.lat, 5), "lng": round(r.lng, 5),
-             "n": int(r.n), "a1": int(r.a1), "deaths": int(r.deaths), "injuries": int(r.injuries),
-             "night": round(float(r.night), 2), "cameraM": int(r.camera_m)} for r in seg.itertuples()]
-
-
-def patrol_list(acc: pd.DataFrame, tree: cKDTree) -> list:
-    cells = json.loads((WEB_DATA / "cells.json").read_text(encoding="utf-8"))
-    hours = acc["event_hour"].to_numpy()
-    out = []
-    for key, rows in cells.items():
+def describe(raw: pd.DataFrame, acc: pd.DataFrame, cams: pd.DataFrame, night_avg: float) -> tuple:
+    published = json.loads((WEB_DATA / "cells.json").read_text(encoding="utf-8"))
+    raw_lats, raw_lons = raw["lat_raw"].to_numpy(), raw["lon_raw"].to_numpy()
+    lats, lons = acc["lat_raw"].to_numpy(), acc["lon_raw"].to_numpy()
+    cam_lat, cam_lon = cams["Latitude"].to_numpy(), cams["Longitude"].to_numpy()
+    out, dropped = [], []
+    for key, rows in published.items():
         county, district = key.split("|")
         for lat, lng, n in rows:
-            h = pd.Series(hours[tree.query_ball_point(xy([lat], [lng])[0], CELL_R)])
+            sub = acc[in_cell(lat, lng, lats, lons)]
+            registered = int(in_cell(lat, lng, raw_lats, raw_lons).sum())
+            if registered and len(sub) / registered < MIN_LOCATED_SHARE:
+                dropped.append(f"{county}{district} ({lat}, {lng}) n={n}: {len(sub)}/{registered} accidents located")
+                continue
+            cameras = int(in_cell(lat, lng, cam_lat, cam_lon).sum())
+            night = float(is_night(sub["event_hour"]).mean()) if len(sub) else 0.0
+            junction = None
+            if len(sub):
+                spot = junction_clusters(sub["lat_raw"].to_numpy(), sub["lon_raw"].to_numpy())
+                best = pd.Series(spot).value_counts()
+                top = sub[spot == best.index[0]]
+                junction = [round(top["lat_raw"].median(), 5), round(top["lon_raw"].median(), 5), int(best.iat[0])]
+            deaths = int(sub["death_count"].sum())
+            measures = []
+            if cameras == 0:
+                measures.append("camera")
+            if junction and junction[2] >= JUNCTION_MIN:
+                measures.append("junction")
+            if len(sub) >= NIGHT_MIN_ACCIDENTS and night >= NIGHT_FACTOR * night_avg:
+                measures.append("night")
+            if deaths:
+                measures.append("fatal")
+            measures.append("patrol")
             out.append({"county": county, "district": district, "lat": lat, "lng": lng, "n": n,
-                        "peakHours": [int(x) for x in h.value_counts().index[:3]],
-                        "night": round(float(((h >= 22) | (h <= 5)).mean()), 2) if len(h) else None})
-    return sorted(out, key=lambda r: -r["n"])
+                        "accidents": int(len(sub)), "deaths": deaths, "injuries": int(sub["injury_count"].sum()),
+                        "night": round(night, 2), "peakHours": [int(h) for h in sub["event_hour"].value_counts().index[:3]],
+                        "cameras": cameras, "junction": junction, "measures": measures})
+    return sorted(out, key=lambda r: (-r["n"], -r["deaths"], -r["accidents"])), dropped
 
 
 def main():
-    acc = clean_positions()
-    tree = cKDTree(xy(acc["lat_raw"], acc["lon_raw"]))
+    raw = fix_districts(pd.read_csv(ACCIDENTS, usecols=[
+        "event_hour", "county", "district", "lat_raw", "lon_raw", "accident_class", "death_count", "injury_count"]))
+    raw = raw.dropna(subset=["district", "lat_raw", "lon_raw"]).reset_index(drop=True)
+    acc = clean_positions(raw)
     cams = pd.read_csv(CAMERAS, skiprows=[1])  # the second row repeats the header in Chinese
     cams = cams[cams["Latitude"].between(21.8, 25.5) & cams["Longitude"].between(118, 122.1)].reset_index(drop=True)
-    cam_tree = cKDTree(xy(cams["Latitude"], cams["Longitude"]))
-
+    night_avg = float(is_night(acc["event_hour"]).mean())
+    cells, dropped = describe(raw, acc, cams, night_avg)
     data = {
-        "meta": {"segmentRadius": SEGMENT_R, "cameraRadius": CAMERA_R, "cameraCount": int(len(cams)),
-                 "accidents": int(len(acc))},
-        "camera": camera_list(acc, cam_tree),
-        "patrol": patrol_list(acc, tree),
+        "meta": {"accidents": int(len(acc)), "cameraCount": int(len(cams)), "nightAvg": round(night_avg, 3),
+                 "nightFactor": NIGHT_FACTOR, "nightHours": list(NIGHT_HOURS), "junctionMin": JUNCTION_MIN,
+                 "placeholderCells": len(dropped)},
+        "cells": cells,
         "cameras": [[round(a, 5), round(b, 5)] for a, b in zip(cams["Latitude"], cams["Longitude"])],
     }
     (WEB_DATA / "prevention.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"accidents with a usable position: {len(acc):,}; fixed cameras: {len(cams):,}")
-    for k in ("camera", "patrol"):
-        top = data[k][0]
-        print(f"{k:7s} {len(data[k]):5d} candidates; first: {top['county']}{top['district']} n={top['n']}")
+    counts = pd.Series([m for c in cells for m in c["measures"]]).value_counts().to_dict()
+    print(f"accidents with a usable position: {len(acc):,}; fixed cameras: {len(cams):,}; night share {night_avg:.3f}")
+    print(f"{len(cells)} published drug-driving cells; measures: {counts}")
+    print(f"left out {len(dropped)} cells made mostly of placeholder positions:", *dropped, sep="\n  ")
 
 
 if __name__ == "__main__":
