@@ -13,8 +13,14 @@ const PREVENT_TOP = 10;
 const PREVENT_COLOR = "#6a3fa0";
 
 const $ = (id) => document.getElementById(id);
-const state = { mode: "drug", rank: "n", county: null, town: null };
-let map, layers, regions, cells, meta, geo, townBreaks, countyBreaks, sv, svService;
+// the drug-driving map can be coloured by the count (where the cases are) or by the rate per
+// 10,000 casualty accidents (where an accident is most likely drug-related)
+const METRICS = {
+  drug: { label: "毒駕件數", title: "毒駕事故件數（加噪）", digits: 0, unit: " 件" },
+  per10k: { label: "每萬件事故比例", title: "每萬件傷亡事故中的毒駕事故數", digits: 1, unit: "" },
+};
+const state = { mode: "drug", rank: "n", metric: "drug", county: null, town: null };
+let map, layers, regions, cells, meta, geo, townBreaks, countyBreaks, sv, svService; // breaks: { drug, per10k }
 let general, allCountyBreaks, allTownBreaks, MarkerClass, prevention;
 let spotMarkers = [];
 const spotNames = new Map(); // "lat,lng" -> road name from the nearest street view, looked up once
@@ -42,8 +48,11 @@ const spotNames = new Map(); // "lat,lng" -> road name from the nearest street v
     counties: topojson.feature(topo, topo.objects.counties),
     towns: topojson.feature(topo, topo.objects.towns),
   };
-  countyBreaks = breaks(Object.values(regions).map((c) => c.per10k));
-  townBreaks = breaks(Object.values(regions).flatMap((c) => Object.values(c.towns).map((t) => t.per10k)));
+  countyBreaks = {}, townBreaks = {};
+  for (const k of Object.keys(METRICS)) {
+    countyBreaks[k] = breaks(Object.values(regions).map((c) => c[k]));
+    townBreaks[k] = breaks(Object.values(regions).flatMap((c) => Object.values(c.towns).map((t) => t[k])));
+  }
 
   const { Map, Data } = await google.maps.importLibrary("maps");
   const { StreetViewPanorama, StreetViewService } = await google.maps.importLibrary("streetView");
@@ -73,7 +82,11 @@ const spotNames = new Map(); // "lat,lng" -> road name from the nearest street v
   document.querySelectorAll(".modes button").forEach((b) => {
     b.onclick = () => { state.mode = b.dataset.mode; go(state.county, state.town); };
   });
-  $("rank-select").onchange = (e) => { state.rank = e.target.value; render(); };
+  $("rank-select").onchange = (e) => {
+    if (state.mode === "drug") state.metric = e.target.value;
+    else state.rank = e.target.value;
+    render();
+  };
   window.addEventListener("popstate", () => fromHash(false));
   fromHash(false);
 })().catch((err) => {
@@ -119,29 +132,32 @@ function render() {
   const prev = mode === "prevent";
 
   document.querySelectorAll(".modes button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
-  $("rank-by").hidden = !all;
-  $("rank-select").innerHTML = Object.entries(general.meta.rankings).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
-  $("rank-select").value = state.rank;
+  const drug = mode === "drug";
+  $("rank-by").hidden = !(all || (drug && !town));
+  $("rank-label").textContent = drug ? "地圖顏色" : "熱點排名依據";
+  const options = drug ? Object.fromEntries(Object.entries(METRICS).map(([k, v]) => [k, v.label])) : general.meta.rankings;
+  $("rank-select").innerHTML = Object.entries(options).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  $("rank-select").value = drug ? state.metric : state.rank;
   $("subtitle").textContent = prev ? "毒駕風險最高的地點，與降低傷亡、科技執法的建議（供實地評估參考）"
-    : all ? "114 年傷亡道路交通事故與路口事故熱點（公開資料）" : "每萬件傷亡事故中的毒駕事故數（差分隱私發布）";
+    : all ? "114 年傷亡道路交通事故與路口事故熱點（公開資料）" : `${METRICS[state.metric].title.replace("（加噪）", "")}（差分隱私發布）`;
 
   layers.towns.forEach((f) => layers.towns.remove(f));
   layers.cells.forEach((f) => layers.cells.remove(f));
   if (county) layers.towns.addGeoJson({ type: "FeatureCollection", features: geo.towns.features.filter((f) => f.properties.COUNTYNAME === county) });
   if (town && mode === "drug") layers.cells.addGeoJson(cellFeatures(county, town));
 
-  const countyValue = (name) => (all ? general.profiles.counties[name]?.profile.total : regions[name]?.per10k);
-  const townValue = (name) => (all ? general.profiles.counties[county]?.towns[name]?.total : regions[county]?.towns[name]?.per10k);
+  const countyValue = (name) => (all ? general.profiles.counties[name]?.profile.total : regions[name]?.[state.metric]);
+  const townValue = (name) => (all ? general.profiles.counties[county]?.towns[name]?.total : regions[county]?.towns[name]?.[state.metric]);
   layers.counties.setStyle((f) => {
     const name = f.getProperty("COUNTYNAME");
     if (prev) return { fillColor: "#ffffff", fillOpacity: name === county ? 0 : 0.35, strokeColor: "#7a7974", strokeWeight: name === county ? 2 : 0.8, clickable: name !== county, cursor: "pointer", zIndex: 0 };
-    if (!county) return polyStyle(colorFor(countyValue(name), all ? allCountyBreaks : countyBreaks), 0.85, true);
+    if (!county) return polyStyle(colorFor(countyValue(name), all ? allCountyBreaks : countyBreaks[state.metric]), 0.85, true);
     return { fillColor: "#ffffff", fillOpacity: name === county ? 0 : 0.55, strokeColor: "#7a7974", strokeWeight: name === county ? 2 : 0.6, clickable: name !== county, zIndex: 0 };
   });
   layers.towns.setStyle((f) => {
     const name = f.getProperty("TOWNNAME");
     if (prev) return { fillColor: "#ffffff", fillOpacity: name === town ? 0 : 0.3, strokeColor: "#7a7974", strokeWeight: name === town ? 2.5 : 0.6, clickable: name !== town, cursor: "pointer", zIndex: 1 };
-    if (!town) return polyStyle(colorFor(townValue(name), all ? allTownBreaks : townBreaks), all ? 0.55 : 0.85, true);
+    if (!town) return polyStyle(colorFor(townValue(name), all ? allTownBreaks : townBreaks[state.metric]), all ? 0.55 : 0.85, true);
     return { fillColor: "#ffffff", fillOpacity: name === town ? 0 : 0.5, strokeColor: "#52514e", strokeWeight: name === town ? 2.5 : 0.6, clickable: name !== town, zIndex: 1 };
   });
   layers.cells.setStyle((f) => ({ ...polyStyle(colorFor(f.getProperty("n"), CELL_BREAKS), 0.8, true), strokeColor: "#ffffff", strokeWeight: 1, zIndex: 2 }));
@@ -584,9 +600,10 @@ function renderHeadline() {
     ];
   } else {
     rec = county ? regions[county] : nationTotals();
+    const byCount = state.metric === "drug";
     stats = [
-      [fmt(rec.per10k, 1), "每萬件事故毒駕數"],
-      [fmt(rec.drug), "毒駕事故（加噪）", true],
+      byCount ? [fmt(rec.drug), "毒駕事故（加噪）"] : [fmt(rec.per10k, 1), "每萬件事故毒駕數"],
+      byCount ? [fmt(rec.per10k, 1), "每萬件事故毒駕數", true] : [fmt(rec.drug), "毒駕事故（加噪）", true],
       [fmt(rec.total), "傷亡事故總數", true],
     ];
   }
@@ -612,8 +629,8 @@ function renderLegend() {
       ${state.county ? `<div class="spot-key"><i>1</i>事故熱點（半徑 ${general.meta.spotRadius}m，約一個路口），數字是排名</div>` : `<div class="spot-key"><i>1</i>點進縣市或鄉鎮，顯示事故熱點</div>`}`;
     return;
   }
-  const br = town ? CELL_BREAKS : state.county ? townBreaks : countyBreaks;
-  const title = town ? `500m 網格內毒駕事故數（加噪，≥ ${meta.minCellCount} 才公開）` : "每萬件傷亡事故中的毒駕事故數";
+  const br = town ? CELL_BREAKS : (state.county ? townBreaks : countyBreaks)[state.metric];
+  const title = town ? `500m 網格內毒駕事故數（加噪，≥ ${meta.minCellCount} 才公開）` : METRICS[state.metric].title;
   $("legend").innerHTML = `<h2>${title}</h2>
     <div class="bar">${RAMP.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
     <div class="ticks">${br.map((b) => `<span>${b}</span>`).join("")}<span>${town ? "+" : ""}</span></div>
@@ -644,10 +661,12 @@ function renderList() {
     if (!items.length) ol.innerHTML = `<li class="sub">這個鄉鎮沒有加噪後 ≥ ${meta.minCellCount} 件的網格。</li>`;
   } else {
     const source = county ? regions[county].towns : regions;
-    const br = county ? townBreaks : countyBreaks;
-    $("list-title").textContent = county ? `${county}各鄉鎮市區（點選進入）` : "各縣市（點選進入）";
+    const m = METRICS[state.metric];
+    const br = (county ? townBreaks : countyBreaks)[state.metric];
+    $("list-title").textContent = `${county ? `${county}各鄉鎮市區` : "各縣市"}${m.label}（點選進入）`;
     items = Object.entries(source)
-      .map(([name, r]) => ({ label: name, value: r.per10k, color: colorFor(r.per10k, br), shown: r.per10k == null ? "不公開" : fmt(r.per10k, 1),
+      .map(([name, r]) => ({ label: name, value: r[state.metric], color: colorFor(r[state.metric], br),
+        shown: r[state.metric] == null ? "不公開" : fmt(r[state.metric], m.digits) + m.unit,
         act: () => (county ? go(county, name) : go(name)) }))
       .sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
   }

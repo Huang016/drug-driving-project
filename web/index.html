@@ -5,21 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>毒駕熱區地圖</title>
 <!-- 改了 style.css 或 app.js 就把 ?v= 後面的數字加一，瀏覽器才不會繼續用舊的快取 -->
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <div class="app">
   <aside class="panel">
     <header>
       <h1>毒駕熱區地圖</h1>
-      <p class="sub" id="subtitle">每萬件傷亡事故中的毒駕事故數（差分隱私發布）</p>
+      <p class="sub" id="subtitle">毒駕事故件數（差分隱私發布）</p>
     </header>
     <div class="modes" role="group" aria-label="要看哪一種事故">
       <button type="button" data-mode="drug">毒駕事故</button>
       <button type="button" data-mode="all">一般事故</button>
       <button type="button" data-mode="prevent">預防建議</button>
     </div>
-    <label class="rank-by" id="rank-by" hidden>熱點排名依據
+    <label class="rank-by" id="rank-by" hidden><span id="rank-label">熱點排名依據</span>
       <select id="rank-select"></select>
     </label>
     <nav class="crumbs" id="crumbs" aria-label="目前位置"></nav>
@@ -59,6 +59,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <script src="config.js" onerror="window.APP_CONFIG_MISSING = true"></script>
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
