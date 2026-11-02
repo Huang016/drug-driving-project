@@ -461,7 +461,7 @@ function renderPreventHeadline() {
     : `${where}沒有公開的毒駕熱點網格。`;
   $("headline").innerHTML = stats.map(([v, k, small]) => `<div class="stat${small ? " small" : ""}"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("") +
     `<p class="profile">${summary}</p>
-     <p class="badge-privacy">隱私預算 +0：只用已公開的差分隱私結果與公開資料</p>`;
+     <p class="badge-privacy">此步驟不再耗用隱私預算：只用已公開的差分隱私結果（總預算 ε = 3）與公開資料</p>`;
 }
 
 function renderPreventLegend() {
