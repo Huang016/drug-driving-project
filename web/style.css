@@ -58,7 +58,7 @@ h2 { font-size: 13px; color: var(--text-2); font-weight: 600; margin: 0 0 6px; }
 .legend .withheld { display: flex; gap: 6px; align-items: center; color: var(--text-2); font-size: 11px; margin-top: 6px; }
 .legend .withheld i { width: 14px; height: 10px; border-radius: 2px; background: var(--withheld); display: inline-block; }
 
-.modes { flex: none; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.modes { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .modes button {
   border: 0; background: none; padding: 7px 0; font: inherit; font-size: 13px; color: var(--text-2); cursor: pointer;
 }
@@ -75,6 +75,10 @@ h2 { font-size: 13px; color: var(--text-2); font-weight: 600; margin: 0 0 6px; }
   display: inline-grid; place-items: center; font-style: normal; font-size: 10px; font-weight: 700; color: #a8321b;
 }
 .list .warn { color: #8a5a00; font-size: 11px; }
+.list .detail { color: var(--text-2); font-size: 11px; }
+.legend .spot-key i.prevent { color: #ffffff; border-color: rgba(0,0,0,.35); }
+.legend .spot-key i.camera-dot { width: 8px; height: 8px; background: #7a7974; border: 1px solid #ffffff; margin: 0 4px; }
+.legend .criteria { color: var(--text-2); font-size: 12px; margin: 6px 0 0; }
 
 .list-wrap { flex: 1 0 auto; }
 .list { list-style: none; margin: 0; padding: 0; }
