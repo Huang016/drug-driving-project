@@ -2,11 +2,8 @@
 
 Usage: python build_prevention.py   (after build_web_data.py, which writes cells.json)
 
-Three candidate lists, each a place to survey first, not a proven fix:
+Two candidate lists, each a place to survey first, not a proven fix:
 
-  school  Primary and junior-high schools (OpenStreetMap) ranked by the casualty
-          accidents within SCHOOL_R m on school days (Mon-Fri, not July/August)
-          in the commute hours COMMUTE_HOURS. For school-zone speed limits.
   camera  Road segments (accidents pooled within SEGMENT_R m of the densest points)
           with at least one fatal (A1) accident and no fixed speed camera within
           CAMERA_R m, ranked by fatal accidents, deaths, then injuries. Cameras: NPA open data 7320,
@@ -14,7 +11,8 @@ Three candidate lists, each a place to survey first, not a proven fix:
   patrol  The drug-driving 500 m cells already published with differential privacy
           in cells.json. Nothing here reads the drug-driving rows again, so the
           privacy budget is unchanged; the busiest hours come from all public accidents
-          in the cell.
+          in the cell. The site ranks counties and districts by the published
+          regions.json counts and uses these cells inside a district.
 
 The accident positions are the public 114-year casualty accidents in Dataset A, cleaned
 as in build_web_data.py (placeholder and stacked positions are left out).
@@ -30,11 +28,8 @@ from build_web_data import (ACCIDENTS, MIXED_DISTRICTS, ROOT, SPOT_LAT, SPOT_LON
                             fix_districts, located, town_rings)
 
 EXTERNAL = ROOT / "data" / "external"
-SCHOOLS = EXTERNAL / "schools_osm.csv"  # OpenStreetMap contributors, ODbL
 CAMERAS = EXTERNAL / "speed_cameras.csv"  # 內政部警政署「測速執法設置點」(data.gov.tw 7320)
 
-SCHOOL_R = 300
-COMMUTE_HOURS = [7, 16, 17]
 SEGMENT_R = 150
 CAMERA_R = 500
 CELL_R = 354  # radius around a 500 m cell centre that covers the cell
@@ -47,7 +42,7 @@ def xy(lat, lon) -> np.ndarray:
 
 def clean_positions() -> pd.DataFrame:
     acc = fix_districts(pd.read_csv(ACCIDENTS, usecols=[
-        "event_date", "event_hour", "county", "district", "lat_raw", "lon_raw", "accident_class", "death_count", "injury_count"]))
+        "event_hour", "county", "district", "lat_raw", "lon_raw", "accident_class", "death_count", "injury_count"]))
     acc = acc.dropna(subset=["district", "lat_raw", "lon_raw"]).reset_index(drop=True)
     rings = town_rings(json.loads((WEB_DATA / "towns.topo.json").read_text(encoding="utf-8")))
     cell = pd.DataFrame({"si": np.floor(acc["lat_raw"] / SPOT_LAT).astype(int), "sj": np.floor(acc["lon_raw"] / SPOT_LON).astype(int),
@@ -55,34 +50,7 @@ def clean_positions() -> pd.DataFrame:
     mixed = cell.groupby(["si", "sj"])["district"].transform("nunique") >= MIXED_DISTRICTS
     stacked = acc.groupby(["lat_raw", "lon_raw"])["county"].transform("size") >= STACKED_MIN
     acc = acc[located(acc, rings) & ~mixed & ~stacked].reset_index(drop=True)
-    acc["date"] = pd.to_datetime(acc["event_date"])
     return acc
-
-
-def area_of(acc: pd.DataFrame, idx) -> tuple:
-    sub = acc.iloc[idx]
-    return sub["county"].mode().iat[0], sub["district"].mode().iat[0]
-
-
-def school_list(acc: pd.DataFrame, tree: cKDTree, cam_tree: cKDTree) -> list:
-    schools = pd.read_csv(SCHOOLS)
-    pts = xy(schools["lat"], schools["lng"])
-    school_day = (acc["date"].dt.weekday < 5) & ~acc["date"].dt.month.isin([7, 8])
-    commute = (school_day & acc["event_hour"].isin(COMMUTE_HOURS)).to_numpy()
-    out = []
-    for s, near, cams in zip(schools.itertuples(), tree.query_ball_point(pts, SCHOOL_R),
-                             cam_tree.query_ball_point(pts, SCHOOL_R)):
-        near = np.asarray(near, dtype=int)
-        hit = near[commute[near]] if len(near) else near
-        if not len(hit):
-            continue
-        sub = acc.iloc[hit]
-        county, district = area_of(acc, near)
-        out.append({"name": s.name, "kind": s.kind, "county": county, "district": district,
-                    "lat": round(s.lat, 5), "lng": round(s.lng, 5), "n": len(hit),
-                    "injuries": int(sub["injury_count"].sum()), "deaths": int(sub["death_count"].sum()),
-                    "all": len(near), "cameras": len(cams)})
-    return sorted(out, key=lambda r: (-r["n"], -r["injuries"]))
 
 
 def segments(acc: pd.DataFrame) -> np.ndarray:
@@ -140,19 +108,17 @@ def main():
     cam_tree = cKDTree(xy(cams["Latitude"], cams["Longitude"]))
 
     data = {
-        "meta": {"schoolRadius": SCHOOL_R, "commuteHours": COMMUTE_HOURS, "segmentRadius": SEGMENT_R,
-                 "cameraRadius": CAMERA_R, "schools": int(len(pd.read_csv(SCHOOLS))), "cameraCount": int(len(cams)),
+        "meta": {"segmentRadius": SEGMENT_R, "cameraRadius": CAMERA_R, "cameraCount": int(len(cams)),
                  "accidents": int(len(acc))},
-        "school": school_list(acc, tree, cam_tree),
         "camera": camera_list(acc, cam_tree),
         "patrol": patrol_list(acc, tree),
         "cameras": [[round(a, 5), round(b, 5)] for a, b in zip(cams["Latitude"], cams["Longitude"])],
     }
     (WEB_DATA / "prevention.json").write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"accidents with a usable position: {len(acc):,}; fixed cameras: {len(cams):,}")
-    for k in ("school", "camera", "patrol"):
+    for k in ("camera", "patrol"):
         top = data[k][0]
-        print(f"{k:7s} {len(data[k]):5d} candidates; first: {top.get('name', '')} {top['county']}{top['district']} n={top['n']}")
+        print(f"{k:7s} {len(data[k]):5d} candidates; first: {top['county']}{top['district']} n={top['n']}")
 
 
 if __name__ == "__main__":

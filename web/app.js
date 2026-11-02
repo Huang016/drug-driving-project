@@ -1,7 +1,7 @@
 // 毒駕熱區地圖：全台（縣市）→ 縣市（鄉鎮）→ 鄉鎮（500m 網格 + 街景）
 // 資料由 hotspot_pipeline/build_web_data.py 產生。毒駕事故是差分隱私發布後的數字；
 // 一般事故是公開的 114 年傷亡事故資料，不加雜訊，熱點細到半徑 30m（約一個路口）。
-// 預防建議由 hotspot_pipeline/build_prevention.py 產生：學區降速、測速照相缺口、毒駕巡邏熱區。
+// 預防建議由 hotspot_pipeline/build_prevention.py 產生：測速照相缺口、毒駕巡邏熱區。
 
 const RAMP = ["#fde0d2", "#f9b293", "#f07f56", "#d9512e", "#a8321b"]; // one hue, light -> dark
 const WITHHELD = "#d9d8d3";
@@ -11,13 +11,12 @@ const ALL_MODE = "一般事故"; // the first part of the URL hash in the genera
 const PREVENT_MODE = "預防建議";
 const PREVENT_TOP = 10;
 const PTYPES = {
-  school: { label: "學區降速", color: "#1f5fa8", advice: "建議評估校園周邊 30 km/h 速限區、上下學時段護童與標線、號誌改善。" },
   camera: { label: "測速照相缺口", color: "#c43c1a", advice: "建議評估設置固定式或區間測速，並檢查照明、標線與路口設計。" },
   patrol: { label: "毒駕巡邏熱區", color: "#6a3fa0", advice: "建議在熱區網格的事故高峰時段安排路檢與巡邏。" },
 };
 
 const $ = (id) => document.getElementById(id);
-const state = { mode: "drug", rank: "n", ptype: "school", county: null, town: null };
+const state = { mode: "drug", rank: "n", ptype: "camera", county: null, town: null };
 let map, layers, regions, cells, meta, geo, townBreaks, countyBreaks, sv, svService;
 let general, allCountyBreaks, allTownBreaks, MarkerClass, prevention;
 let spotMarkers = [];
@@ -300,24 +299,49 @@ let preventMarkers = [];
 
 function preventItems() {
   const { county, town, ptype } = state;
+  if (ptype === "patrol" && !town) return patrolAreas();
   return prevention[ptype].filter((r) => (!county || r.county === county) && (!town || r.district === town))
     .slice(0, PREVENT_TOP).map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
+function patrolAreas() {
+  // nation -> counties, county -> districts, ranked by the published (noisy) drug-driving counts;
+  // the marker sits on the area's busiest published 500 m cell
+  const { county } = state;
+  const source = county ? regions[county]?.towns || {} : regions;
+  return Object.entries(source)
+    .filter(([, r]) => r.drug != null)
+    .map(([name, r]) => {
+      const c = county || name;
+      const d = county ? name : null;
+      const cell = prevention.patrol.find((p) => p.county === c && (!d || p.district === d));
+      return { area: true, county: c, district: d, name: county ? `${county}${name}` : name, n: Math.round(r.drug),
+        lat: cell?.lat, lng: cell?.lng, peakHours: cell?.peakHours || [] };
+    })
+    .sort((a, b) => b.n - a.n)
+    .slice(0, PREVENT_TOP)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
 function preventCount(county, town) {
   return prevention[state.ptype].filter((r) => r.county === county && (!town || r.district === town)).length;
 }
 
+function preventClick(s) {
+  if (s.area) return s.district ? go(s.county, s.district) : go(s.county);
+  return openPrevent(s);
+}
+
 function drawPrevent(items, cameraArea) {
   preventMarkers.forEach((m) => m.setMap(null));
   const color = PTYPES[state.ptype].color;
-  preventMarkers = items.map((s) => {
+  preventMarkers = items.filter((s) => s.lat != null).map((s) => {
     const m = new MarkerClass({
       map, position: { lat: s.lat, lng: s.lng }, zIndex: 200 - s.rank, title: `${PTYPES[state.ptype].label} ${s.rank}`,
       icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: color, fillOpacity: 0.9, strokeColor: "#ffffff", strokeWeight: 2 },
       label: { text: String(s.rank), color: "#ffffff", fontSize: "13px", fontWeight: "700" },
     });
-    m.addListener("click", () => openPrevent(s));
+    m.addListener("click", () => preventClick(s));
     m.addListener("mouseover", (e) => showTip(e, preventTip(s)));
     m.addListener("mouseout", hideTip);
     return m;
@@ -335,19 +359,16 @@ function drawPrevent(items, cameraArea) {
 }
 
 function preventTitle(s) {
-  if (state.ptype === "school") return s.name;
+  if (s.area) return s.name;
   return spotNames.get(spotKey(s)) || `${s.county}${s.district}`;
 }
 
 function preventDetail(s) {
-  const m = prevention.meta;
-  if (state.ptype === "school") {
-    return `上下學時段 ${m.schoolRadius}m 內傷亡事故 ${fmt(s.n)} 件・受傷 ${fmt(s.injuries)} 人${s.deaths ? `・死亡 ${s.deaths} 人` : ""}・周邊固定測速照相 ${s.cameras} 支`;
-  }
   if (state.ptype === "camera") {
     return `A1 死亡事故 ${s.a1} 件・死亡 ${s.deaths} 人・受傷 ${fmt(s.injuries)} 人・最近的固定測速照相 ${fmt(s.cameraM)}m`;
   }
-  return `毒駕事故約 ${s.n} 件（加噪）・事故高峰 ${s.peakHours.map((h) => `${h} 時`).join("、")}`;
+  const hours = s.peakHours.length ? `・${s.area ? "最熱網格" : ""}事故高峰 ${s.peakHours.map((h) => `${h} 時`).join("、")}` : "";
+  return `毒駕事故約 ${fmt(s.n)} 件（加噪）${hours}`;
 }
 
 function preventValue(s) {
@@ -355,38 +376,38 @@ function preventValue(s) {
 }
 
 function preventShown(s) {
-  return { school: `${fmt(s.n)} 件`, camera: `死亡 ${s.deaths}`, patrol: `約 ${s.n} 件` }[state.ptype];
+  return state.ptype === "camera" ? `死亡 ${s.deaths}` : `約 ${fmt(s.n)} 件`;
 }
 
 function preventTip(s) {
-  return `<b>${s.rank}. ${preventTitle(s)}</b>${preventDetail(s)}<br>點一下看街景`;
+  return `<b>${s.rank}. ${preventTitle(s)}</b>${preventDetail(s)}<br>${s.area ? "點一下進入" : "點一下看街景"}`;
 }
 
 function preventSub(s) {
-  const where = state.county ? "" : `${s.county}${s.district}・`;
-  if (state.ptype === "patrol") return `${where}高峰 ${s.peakHours.map((h) => `${h}時`).join("、")}`;
+  const where = state.county || s.area ? "" : `${s.county}${s.district}・`;
   if (state.ptype === "camera") return `${where}最近測速照相 ${fmt(s.cameraM)}m`;
-  return `${where}受傷 ${fmt(s.injuries)} 人`;
+  return s.peakHours.length ? `${where}${s.area ? "最熱網格" : ""}高峰 ${s.peakHours.map((h) => `${h}時`).join("、")}` : where;
 }
 
 function renderPreventList() {
   const { county, town } = state;
   const items = preventItems();
   const t = PTYPES[state.ptype];
-  $("spots-title").textContent = `${town ? county + town : county || "全台"}${t.label}前 ${PREVENT_TOP} 名（點選看街景）`;
+  const unit = state.ptype === "patrol" && !town ? (county ? "（依鄉鎮，點選進入）" : "（依縣市，點選進入）") : "（點選看街景）";
+  $("spots-title").textContent = `${town ? county + town : county || "全台"}${t.label}前 ${PREVENT_TOP} 名${unit}`;
   const ol = $("spots");
   ol.innerHTML = items.length ? "" : `<li class="sub">這個地區沒有符合條件的地點。</li>`;
   const max = Math.max(...items.map(preventValue), 1);
   items.forEach((s) => {
     const li = document.createElement("li");
     li.innerHTML = `<button type="button"><span class="rank">${s.rank}</span>
-      <span class="name"><span class="road">${state.ptype === "school" ? s.name : "查詢路名…"}</span>
+      <span class="name"><span class="road">${s.area ? s.name : "查詢路名…"}</span>
       <span class="detail">${preventSub(s)}</span>
       <span class="meter"><i style="width:${(preventValue(s) / max) * 100}%;background:${t.color}"></i></span></span>
       <span class="val">${preventShown(s)}</span></button>`;
-    li.querySelector("button").onclick = () => openPrevent(s);
+    li.querySelector("button").onclick = () => preventClick(s);
     ol.append(li);
-    if (state.ptype !== "school") {
+    if (!s.area) {
       roadName(s).then((name) => { li.querySelector(".road").textContent = name || `${s.county}${s.district}（${s.lat.toFixed(4)}, ${s.lng.toFixed(4)}）`; });
     }
   });
@@ -401,11 +422,8 @@ async function openPrevent(s) {
   sv.setVisible(false);
   map.panTo({ lat: s.lat, lng: s.lng });
   if (map.getZoom() < 16) map.setZoom(16);
-  const note = {
-    school: "位置是學校的位置。",
-    camera: `位置是半徑 ${prevention.meta.segmentRadius}m 路段內事故的中心。`,
-    patrol: "位置是 500m 網格中心附近，<b>不是事故的精確地點</b>。",
-  }[state.ptype];
+  const note = state.ptype === "camera" ? `位置是半徑 ${prevention.meta.segmentRadius}m 路段內事故的中心。`
+    : "位置是 500m 網格中心附近，<b>不是事故的精確地點</b>。";
   try {
     const { data } = await svService.getPanorama({ location: { lat: s.lat, lng: s.lng }, radius: state.ptype === "patrol" ? 250 : 80,
       preference: google.maps.StreetViewPreference.NEAREST, sources: panoSources() });
@@ -422,19 +440,19 @@ async function openPrevent(s) {
 function renderPreventHeadline() {
   const { county, town } = state;
   const t = PTYPES[state.ptype];
-  const inArea = prevention[state.ptype].filter((r) => (!county || r.county === county) && (!town || r.district === town));
-  const top = inArea.slice(0, PREVENT_TOP);
   let stats;
-  if (state.ptype === "school") {
-    stats = [[fmt(inArea.length), "上下學時段周邊有事故的國中小"], [fmt(top.filter((s) => !s.cameras).length), `前 ${top.length} 名周邊無固定測速照相`, true]];
-  } else if (state.ptype === "camera") {
+  if (state.ptype === "camera") {
+    const inArea = prevention.camera.filter((r) => (!county || r.county === county) && (!town || r.district === town));
     stats = [[fmt(inArea.length), `有死亡事故、${prevention.meta.cameraRadius}m 內無固定測速照相的路段`],
       [fmt(inArea.reduce((x, s) => x + s.deaths, 0)), "這些路段的死亡人數", true]];
   } else {
+    const rec = town ? regions[county].towns[town] : county ? regions[county] : nationTotals();
+    const cellsIn = prevention.patrol.filter((r) => (!county || r.county === county) && (!town || r.district === town));
     const hours = {};
-    top.forEach((s) => s.peakHours.forEach((h) => { hours[h] = (hours[h] || 0) + 1; }));
+    cellsIn.slice(0, PREVENT_TOP).forEach((s) => s.peakHours.forEach((h) => { hours[h] = (hours[h] || 0) + 1; }));
     const peak = Object.entries(hours).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([h]) => `${h} 時`).join("、");
-    stats = [[fmt(inArea.length), "公開的毒駕熱點網格"], [peak || "—", "前 10 名網格常見的事故高峰", true]];
+    stats = [[rec.drug == null ? "不公開" : fmt(rec.drug), "毒駕事故（加噪）"], [fmt(cellsIn.length), "公開的熱點網格", true],
+      [peak || "—", "熱點網格常見的事故高峰", true]];
   }
   $("headline").innerHTML = stats.map(([v, k, small]) => `<div class="stat${small ? " small" : ""}"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("") +
     `<p class="profile"><b>${t.advice}</b></p>`;
@@ -443,11 +461,9 @@ function renderPreventHeadline() {
 function renderPreventLegend() {
   const m = prevention.meta;
   const t = PTYPES[state.ptype];
-  const criteria = {
-    school: `國中小 ${m.schoolRadius}m 內，平日 ${m.commuteHours.map((h) => `${h} 時`).join("、")}（不含 7、8 月）的傷亡事故件數排名。`,
-    camera: `把半徑 ${m.segmentRadius}m 內的事故算成一個路段；路段內有 A1 死亡事故、且 ${m.cameraRadius}m 內沒有固定測速照相，依死亡事故數、死亡人數排名。`,
-    patrol: "已用差分隱私公開的毒駕 500m 熱點網格，依加噪後件數排名；高峰時段取自網格內所有公開事故。",
-  }[state.ptype];
+  const criteria = state.ptype === "camera"
+    ? `把半徑 ${m.segmentRadius}m 內的事故算成一個路段；路段內有 A1 死亡事故、且 ${m.cameraRadius}m 內沒有固定測速照相，依死亡事故數、死亡人數排名。`
+    : "全台依縣市、縣市依鄉鎮的毒駕事故數（差分隱私加噪後）排名，標記放在該地區最熱的公開網格；進到鄉鎮後列出 500m 熱點網格。高峰時段取自網格內所有公開事故。";
   $("legend").innerHTML = `<h2>${t.label}</h2>
     <div class="spot-key"><i class="prevent" style="background:${t.color}">1</i>建議優先評估的地點，數字是排名</div>
     ${state.ptype === "camera" ? `<div class="spot-key"><i class="camera-dot"></i>現有固定測速照相（點進縣市後顯示）</div>` : ""}
@@ -458,9 +474,10 @@ function renderPreventAreas() {
   const { county, town } = state;
   const ol = $("list");
   ol.innerHTML = "";
-  if (town) { $("list-title").textContent = ""; return; }
+  // the patrol list above is already by county / district
+  if (town || state.ptype === "patrol") { $("list-title").textContent = ""; return; }
   const t = PTYPES[state.ptype];
-  $("list-title").textContent = `${county ? `${county}各鄉鎮市區` : "各縣市"}的${t.label}候選地點數（點選進入）`;
+  $("list-title").textContent = `${county ? `${county}各鄉鎮市區` : "各縣市"}的${t.label}路段數（點選進入）`;
   const counts = {};
   prevention[state.ptype].filter((r) => !county || r.county === county)
     .forEach((r) => { const k = county ? r.district : r.county; counts[k] = (counts[k] || 0) + 1; });
@@ -476,13 +493,19 @@ function renderPreventAreas() {
   });
 }
 
+function preventAreaTip(county, town) {
+  if (state.ptype === "camera") return `${PTYPES.camera.label} ${fmt(preventCount(county, town))} 處`;
+  const r = town ? regions[county]?.towns[town] : regions[county];
+  return r?.drug == null ? "毒駕事故件數過少，不公開" : `毒駕事故約 ${fmt(r.drug)} 件（加噪）`;
+}
+
 function renderPreventSources() {
   const m = prevention.meta;
   $("privacy").querySelector("summary").textContent = "預防建議怎麼算出來的？";
   $("privacy-body").innerHTML = `<ol>
     <li>事故位置、時間與死傷取自警政署公開的 <b>114 年傷亡道路交通事故資料</b>（${fmt(m.accidents)} 件座標可用）。</li>
-    <li>學校位置取自 <b>OpenStreetMap</b>（${fmt(m.schools)} 所國中小，可能有缺漏）；測速照相取自警政署開放資料「<b>測速執法設置點</b>」（${fmt(m.cameraCount)} 支，只含固定式，不含移動式、區間測速與國道）。</li>
-    <li>毒駕巡邏熱區只使用<b>已加差分隱私雜訊並公開</b>的 500m 網格，沒有再讀取毒駕個案資料，所以不增加隱私預算。專案的毒駕資料為模擬資料，這一類是方法示範。</li>
+    <li>測速照相取自警政署開放資料「<b>測速執法設置點</b>」（${fmt(m.cameraCount)} 支，只含固定式，不含移動式、區間測速與國道）。</li>
+    <li>毒駕巡邏熱區只使用<b>已加差分隱私雜訊並公開</b>的縣市、鄉鎮與 500m 網格數字，沒有再讀取毒駕個案資料，所以不增加隱私預算。專案的毒駕資料為模擬資料，這一類是方法示範。</li>
     <li>這些是「事故多、設施少」的<b>優先評估地點</b>，實際改善仍需現場勘查與交通工程評估，不代表設置後一定能降低傷亡。</li>
   </ol>`;
 }
@@ -705,7 +728,7 @@ function tipAll(label, p) {
 }
 
 function tipCounty(name) {
-  if (state.mode === "prevent") return `<b>${name}</b>${PTYPES[state.ptype].label}候選 ${fmt(preventCount(name))} 處`;
+  if (state.mode === "prevent") return `<b>${name}</b>${preventAreaTip(name)}`;
   if (state.mode === "all") return tipAll(name, profileOf(name));
   const r = regions[name];
   if (!r) return `<b>${name}</b>無資料`;
@@ -713,7 +736,7 @@ function tipCounty(name) {
 }
 
 function tipTown(county, name) {
-  if (state.mode === "prevent") return `<b>${county}${name}</b>${PTYPES[state.ptype].label}候選 ${fmt(preventCount(county, name))} 處`;
+  if (state.mode === "prevent") return `<b>${county}${name}</b>${preventAreaTip(county, name)}`;
   if (state.mode === "all") return tipAll(`${county}${name}`, profileOf(county, name));
   const r = regions[county]?.towns[name];
   if (!r) return `<b>${name}</b>無資料`;
