@@ -23,9 +23,20 @@ Each remaining cell gets the measures its numbers point to (codes, worded on the
   fatal     at least one death in the cell                  -> speed reduction first
   patrol    always                                          -> checkpoints in the peak hours
 
+and a priority tier, a rule that can be said in one sentence:
+
+  1  drug-driving count >= TIER1_MIN even after the noise's 95% margin is taken off,
+     and someone died there or a junction collects accidents
+  2  any measure besides the checkpoints
+  3  checkpoints only
+
+The noise margin is post-processing of the published numbers: a Laplace count with
+scale 1/epsilon_grid lies within scale x ln(20) of the truth 95% of the time.
+
 These are places to survey first, not proven fixes.
 """
 import json
+import math
 
 import numpy as np
 import pandas as pd
@@ -40,6 +51,7 @@ NIGHT_FACTOR = 1.25
 NIGHT_MIN_ACCIDENTS = 30  # below this a night share is too unstable to flag
 NIGHT_HOURS = (22, 5)  # 22:00-05:59
 MIN_LOCATED_SHARE = 0.5  # below this the cell is mostly placeholder positions
+TIER1_MIN = 3  # lower end of the 95% range, so a tier-1 cell is a hotspot whatever the noise drew
 
 
 def is_night(hour: pd.Series) -> pd.Series:
@@ -59,7 +71,13 @@ def in_cell(lat, lng, lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
     return (np.abs(lats - lat) <= CELL_LAT / 2) & (np.abs(lons - lng) <= CELL_LON / 2)
 
 
-def describe(raw: pd.DataFrame, acc: pd.DataFrame, cams: pd.DataFrame, night_avg: float) -> tuple:
+def tier(n: int, measures: list, margin: float) -> int:
+    if n - margin >= TIER1_MIN and ("fatal" in measures or "junction" in measures):
+        return 1
+    return 2 if len(measures) > 1 else 3
+
+
+def describe(raw: pd.DataFrame, acc: pd.DataFrame, cams: pd.DataFrame, night_avg: float, margin: float) -> tuple:
     published = json.loads((WEB_DATA / "cells.json").read_text(encoding="utf-8"))
     raw_lats, raw_lons = raw["lat_raw"].to_numpy(), raw["lon_raw"].to_numpy()
     lats, lons = acc["lat_raw"].to_numpy(), acc["lon_raw"].to_numpy()
@@ -95,7 +113,8 @@ def describe(raw: pd.DataFrame, acc: pd.DataFrame, cams: pd.DataFrame, night_avg
             out.append({"county": county, "district": district, "lat": lat, "lng": lng, "n": n,
                         "accidents": int(len(sub)), "deaths": deaths, "injuries": int(sub["injury_count"].sum()),
                         "night": round(night, 2), "peakHours": [int(h) for h in sub["event_hour"].value_counts().index[:3]],
-                        "cameras": cameras, "junction": junction, "measures": measures})
+                        "cameras": cameras, "junction": junction, "measures": measures,
+                        "tier": tier(n, measures, margin)})
     return sorted(out, key=lambda r: (-r["n"], -r["deaths"], -r["accidents"])), dropped
 
 
@@ -107,11 +126,13 @@ def main():
     cams = pd.read_csv(CAMERAS, skiprows=[1])  # the second row repeats the header in Chinese
     cams = cams[cams["Latitude"].between(21.8, 25.5) & cams["Longitude"].between(118, 122.1)].reset_index(drop=True)
     night_avg = float(is_night(acc["event_hour"]).mean())
-    cells, dropped = describe(raw, acc, cams, night_avg)
+    eps_grid = json.loads((WEB_DATA / "regions.json").read_text(encoding="utf-8"))["meta"]["epsilonGrid"]
+    margin = round(math.log(20) / eps_grid, 1)
+    cells, dropped = describe(raw, acc, cams, night_avg, margin)
     data = {
         "meta": {"accidents": int(len(acc)), "cameraCount": int(len(cams)), "nightAvg": round(night_avg, 3),
                  "nightFactor": NIGHT_FACTOR, "nightHours": list(NIGHT_HOURS), "junctionMin": JUNCTION_MIN,
-                 "placeholderCells": len(dropped)},
+                 "placeholderCells": len(dropped), "epsilonGrid": eps_grid, "margin95": margin, "tier1Min": TIER1_MIN},
         "cells": cells,
         "cameras": [[round(a, 5), round(b, 5)] for a, b in zip(cams["Latitude"], cams["Longitude"])],
     }
@@ -119,6 +140,7 @@ def main():
     counts = pd.Series([m for c in cells for m in c["measures"]]).value_counts().to_dict()
     print(f"accidents with a usable position: {len(acc):,}; fixed cameras: {len(cams):,}; night share {night_avg:.3f}")
     print(f"{len(cells)} published drug-driving cells; measures: {counts}")
+    print("tiers:", pd.Series([c["tier"] for c in cells]).value_counts().sort_index().to_dict(), f"(95% margin +-{margin})")
     print(f"left out {len(dropped)} cells made mostly of placeholder positions:", *dropped, sep="\n  ")
 
 

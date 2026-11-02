@@ -21,6 +21,9 @@ District level
   reaches GRID_MIN_COUNT are published.
   One person is counted once in the district release and once in the grid, so
   the two compose sequentially: total epsilon = epsilon_district + epsilon_grid.
+  Accidents on a placeholder position (see "General accidents" below) are left
+  out of the grid before the noise: their cell is where the accident was
+  registered, not where it happened (one 新北市 point collects 21 districts).
 
 The grid needs each person's cell. In the PSI flow A only sends county and
 district (psi_pqc/institution.py); until A also sends the cell id, the grid is
@@ -114,14 +117,19 @@ def district_release(epsilon: float):
     return out, real, source.name
 
 
-def grid_release(accidents: pd.DataFrame, epsilon: float):
+def grid_release(accidents: pd.DataFrame, epsilon: float, rings: dict):
     acc = accidents.dropna(subset=["lat_raw", "lon_raw", "district"])
+    acc = acc[usable(acc, rings)]
     acc = acc.join(cell_index(acc["lat_raw"], acc["lon_raw"]))
     # each cell belongs to the district where most of its (public) accidents happened
     owner = (acc.groupby(["ci", "cj", "county", "district"]).size().rename("k").reset_index()
              .sort_values("k", ascending=False).drop_duplicates(["ci", "cj"]).set_index(["ci", "cj"]))
 
-    wide = pd.read_csv(WIDE_TABLE, usecols=["lat_raw", "lon_raw"]).dropna()
+    # the wide table's positions come from A; keep a person only if A has that position as usable
+    good = set(zip(acc["lat_raw"], acc["lon_raw"], acc["district"]))
+    wide = fix_districts(pd.read_csv(WIDE_TABLE, usecols=["county", "district", "lat_raw", "lon_raw"])).dropna()
+    placeholder = ~pd.Series([k in good for k in zip(wide["lat_raw"], wide["lon_raw"], wide["district"])], index=wide.index)
+    wide = wide[~placeholder]
     real = wide.join(cell_index(wide["lat_raw"], wide["lon_raw"])).groupby(["ci", "cj"]).size()
     real = real.reindex(owner.index, fill_value=0)
 
@@ -132,6 +140,7 @@ def grid_release(accidents: pd.DataFrame, epsilon: float):
     cells["lng"] = ((cells["cj"].astype(float) + 0.5) * CELL_LON).round(5)
 
     report = {
+        "placeholder_people": int(placeholder.sum()),
         "candidates": int(len(real)),
         "real_cells": int((real > 0).sum()),
         "published": int(keep.sum()),
@@ -190,6 +199,15 @@ def located(acc: pd.DataFrame, rings: dict) -> pd.Series:
     return ok
 
 
+def usable(acc: pd.DataFrame, rings: dict) -> pd.Series:
+    """True where the accident's position can stand for where it happened: inside (or near) its own
+    district, and not in a 100 m cell holding accidents from MIXED_DISTRICTS or more districts."""
+    si, sj = np.floor(acc["lat_raw"] / SPOT_LAT).astype(int), np.floor(acc["lon_raw"] / SPOT_LON).astype(int)
+    # a placeholder point collects accidents registered all over the city; a real junction on a border has two or three
+    mixed = acc.assign(si=si, sj=sj).groupby(["si", "sj"])["district"].transform("nunique") >= MIXED_DISTRICTS
+    return located(acc, rings) & ~mixed
+
+
 def vehicle_group(vehicle_type: pd.Series) -> pd.Series:
     kind = vehicle_type.str.split("-").str[0]
     return kind.replace({"小客車(含客、貨兩用)": "小客車", "人": "行人", "慢車": "自行車等慢車",
@@ -244,10 +262,7 @@ def general_release(acc: pd.DataFrame, rings: dict):
         profiles["counties"][c] = {"profile": area_profile(g),
                                    "towns": {d: area_profile(t) for d, t in g.groupby("district")}}
 
-    acc = acc.assign(si=np.floor(acc["lat_raw"] / SPOT_LAT).astype(int), sj=np.floor(acc["lon_raw"] / SPOT_LON).astype(int))
-    # a placeholder point collects accidents registered all over the city; a real junction on a border has two or three
-    mixed = acc.groupby(["si", "sj"])["district"].transform("nunique") >= MIXED_DISTRICTS
-    ok = located(acc.dropna(subset=["district"]), rings).reindex(acc.index, fill_value=False) & ~mixed
+    ok = usable(acc.dropna(subset=["district"]), rings).reindex(acc.index, fill_value=False)
     pos = acc[ok].reset_index(drop=True)
     pos["spot"] = junction_clusters(pos["lat_raw"].to_numpy(), pos["lon_raw"].to_numpy())
     cells = (pos.groupby("spot")
@@ -285,9 +300,10 @@ def main():
     totals = accidents.groupby(["county", "district"]).size()
 
     dist, real, source = district_release(eps_d)
-    cells, grid = grid_release(accidents, eps_g)
     atlas_towns = write_atlas()
-    general, spots, spot_report = general_release(accidents, town_rings(json.loads((WEB_DATA / "towns.topo.json").read_text(encoding="utf-8"))))
+    rings = town_rings(json.loads((WEB_DATA / "towns.topo.json").read_text(encoding="utf-8")))
+    cells, grid = grid_release(accidents, eps_g, rings)
+    general, spots, spot_report = general_release(accidents, rings)
 
     counties = {}
     for c, g in dist.groupby("county"):

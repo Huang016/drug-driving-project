@@ -287,6 +287,16 @@ async function openSpot(s) {
 // ---------- prevention (預防建議) ----------
 
 let preventMarkers = [];
+const TIERS = {
+  1: { label: "第一優先", short: "立即改善", color: "#c0321e" },
+  2: { label: "第二優先", short: "需要改善", color: "#e07b1a" },
+  3: { label: "第三優先", short: "加強路檢", color: "#3f7cb0" },
+};
+
+function range95(n) {
+  const m = prevention.meta.margin95;
+  return `${fmt(Math.max(0, n - m), 1)}–${fmt(n + m, 1)}`;
+}
 
 function measureList(s) {
   // [short tag, full sentence] for each measure the cell's public numbers point to
@@ -315,8 +325,9 @@ function countyAreas() {
   return Object.entries(regions)
     .filter(([, r]) => r.drug != null)
     .map(([name, r]) => {
-      const cell = prevention.cells.find((p) => p.county === name);
-      return { area: true, county: name, name, n: Math.round(r.drug), lat: cell?.lat, lng: cell?.lng };
+      const cells = prevention.cells.filter((p) => p.county === name);
+      return { area: true, county: name, name, n: Math.round(r.drug), lat: cells[0]?.lat, lng: cells[0]?.lng,
+        places: cells.length, tier1: cells.filter((c) => c.tier === 1).length };
     })
     .sort((a, b) => b.n - a.n)
     .slice(0, PREVENT_TOP)
@@ -332,7 +343,7 @@ function drawPrevent(items, area) {
   preventMarkers = items.filter((s) => s.lat != null).map((s) => {
     const m = new MarkerClass({
       map, position: { lat: s.lat, lng: s.lng }, zIndex: 200 - s.rank, title: `毒駕高風險地點 ${s.rank}`,
-      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: PREVENT_COLOR, fillOpacity: 0.9, strokeColor: "#ffffff", strokeWeight: 2 },
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: s.area ? PREVENT_COLOR : TIERS[s.tier].color, fillOpacity: 0.92, strokeColor: "#ffffff", strokeWeight: 2 },
       label: { text: String(s.rank), color: "#ffffff", fontSize: "13px", fontWeight: "700" },
     });
     m.addListener("click", () => preventClick(s));
@@ -358,8 +369,8 @@ function preventTitle(s) {
 }
 
 function preventDetail(s) {
-  if (s.area) return `毒駕事故約 ${fmt(s.n)} 件（加噪）`;
-  return `毒駕事故約 ${s.n} 件（加噪）・500m 內傷亡事故 ${fmt(s.accidents)} 件${s.deaths ? `・死亡 ${s.deaths} 人` : ""}・固定測速照相 ${s.cameras} 支`;
+  if (s.area) return `毒駕事故約 ${fmt(s.n)} 件（加噪）・熱點 ${s.places} 處，第一優先 ${s.tier1} 處`;
+  return `${TIERS[s.tier].label}・毒駕事故約 ${s.n} 件（95% 落在 ${range95(s.n)}）・500m 內傷亡事故 ${fmt(s.accidents)} 件${s.deaths ? `・死亡 ${s.deaths} 人` : ""}・固定測速照相 ${s.cameras} 支`;
 }
 
 function preventTip(s) {
@@ -378,13 +389,13 @@ function renderPreventList() {
   const max = Math.max(...items.map((s) => s.n), 1);
   items.forEach((s) => {
     const li = document.createElement("li");
-    const tags = s.area ? "" : `<span class="tags">${measureList(s).filter(([t]) => t !== "路檢時段").map(([t]) => `<i>${t}</i>`).join("")}</span>`;
+    const tags = s.area ? "" : `<span class="tags"><b style="background:${TIERS[s.tier].color}">${TIERS[s.tier].label}</b>${measureList(s).filter(([t]) => t !== "路檢時段").map(([t]) => `<i>${t}</i>`).join("")}</span>`;
     li.innerHTML = `<button type="button"><span class="rank">${s.rank}</span>
       <span class="name"><span class="road">${s.area ? s.name : "查詢路名…"}</span>
-      ${s.area ? "" : `<span class="detail">${town ? "" : `${s.district}・`}傷亡事故 ${fmt(s.accidents)} 件・高峰 ${s.peakHours.map((h) => `${h}時`).join("、")}</span>`}
+      <span class="detail">${s.area ? `熱點 ${s.places} 處・第一優先 ${s.tier1} 處` : `${town ? "" : `${s.district}・`}傷亡事故 ${fmt(s.accidents)} 件・路檢 ${s.peakHours.map((h) => `${h}時`).join("、")}`}</span>
       ${tags}
-      <span class="meter"><i style="width:${(s.n / max) * 100}%;background:${PREVENT_COLOR}"></i></span></span>
-      <span class="val">約 ${fmt(s.n)} 件</span></button>`;
+      <span class="meter"><i style="width:${(s.n / max) * 100}%;background:${s.area ? PREVENT_COLOR : TIERS[s.tier].color}"></i></span></span>
+      <span class="val">約 ${fmt(s.n)} 件${s.area ? "" : `<small>±${prevention.meta.margin95}</small>`}</span></button>`;
     li.querySelector("button").onclick = () => preventClick(s);
     ol.append(li);
     if (!s.area) {
@@ -398,7 +409,7 @@ async function openPrevent(s) {
   box.hidden = false;
   // the busiest junction is where a camera or a redesign would go; otherwise the cell centre
   const at = s.junction && s.measures.includes("junction") ? { lat: s.junction[0], lng: s.junction[1] } : { lat: s.lat, lng: s.lng };
-  $("sv-title").textContent = `毒駕高風險地點 ${s.rank}・${preventTitle(s)}`;
+  $("sv-title").textContent = `${TIERS[s.tier].label} ${s.rank}・${preventTitle(s)}`;
   $("sv-sub").innerHTML = `${preventDetail(s)}<ul class="measures">${measureList(s).map(([, t]) => `<li>${t}</li>`).join("")}</ul>`;
   $("sv-foot").textContent = "搜尋最近的街景…";
   sv.setVisible(false);
@@ -422,19 +433,32 @@ function renderPreventHeadline() {
   const { county, town } = state;
   const rec = town ? regions[county].towns[town] : county ? regions[county] : nationTotals();
   const cellsIn = prevention.cells.filter((r) => (!county || r.county === county) && (!town || r.district === town));
-  const noCamera = cellsIn.filter((c) => c.measures.includes("camera")).length;
-  const stats = [[rec.drug == null ? "不公開" : fmt(rec.drug), "毒駕事故（加噪）"], [fmt(cellsIn.length), "毒駕熱點網格", true],
-    [fmt(noCamera), "其中沒有固定測速照相", true]];
+  const count = (k) => cellsIn.filter((c) => c.measures.includes(k)).length;
+  const tier = (t) => cellsIn.filter((c) => c.tier === t).length;
+  const stats = [[rec.drug == null ? "不公開" : fmt(rec.drug), "毒駕事故（加噪）"], [fmt(cellsIn.length), "毒駕熱點（500m）", true],
+    [fmt(tier(1)), "第一優先：立即改善", true]];
+  const where = town ? county + town : county || "全台";
+  const first = cellsIn[0];
+  const summary = cellsIn.length
+    ? `<b>${where}</b>的 ${fmt(cellsIn.length)} 個毒駕熱點中，${fmt(count("camera"))} 處沒有固定測速照相、${fmt(count("junction"))} 處路口事故集中、${fmt(count("night"))} 處夜間事故偏高、${fmt(count("fatal"))} 處發生過死亡事故。`
+    + (county && first ? `毒駕風險最高的是 <b>${first.district}</b> 的第 1 名地點，建議：${measureList(first).filter(([t]) => t !== "路檢時段").map(([t]) => t).join("、") || "加強路檢"}。` : "")
+    : `${where}沒有公開的毒駕熱點網格。`;
   $("headline").innerHTML = stats.map(([v, k, small]) => `<div class="stat${small ? " small" : ""}"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("") +
-    `<p class="profile">先找出毒駕風險最高的地點，再依各地點的事故型態，建議<b>降速與測速照相、路口科技執法、夜間照明與異常行車監測、路檢時段</b>。</p>`;
+    `<p class="profile">${summary}</p>
+     <p class="badge-privacy">隱私預算 +0：只用已公開的差分隱私結果與公開資料</p>`;
 }
 
 function renderPreventLegend() {
   const m = prevention.meta;
-  $("legend").innerHTML = `<h2>毒駕高風險地點</h2>
-    <div class="spot-key"><i class="prevent" style="background:${PREVENT_COLOR}">1</i>毒駕風險排名（加噪後毒駕事故數）</div>
+  const tiers = [
+    [1, `毒駕事故扣掉雜訊誤差後仍 ≥ ${m.tier1Min} 件，且有死亡事故或路口事故集中`],
+    [2, "有測速照相、路口、夜間或死亡等任一改善缺口"],
+    [3, "沒有明顯缺口，於事故高峰時段加強路檢即可"],
+  ];
+  $("legend").innerHTML = `<h2>毒駕高風險地點（顏色＝優先等級，數字＝毒駕風險排名）</h2>
+    ${tiers.map(([t, rule]) => `<div class="spot-key"><i class="prevent" style="background:${TIERS[t].color}"></i><span><b>${TIERS[t].label}・${TIERS[t].short}</b>：${rule}</span></div>`).join("")}
     <div class="spot-key"><i class="camera-dot"></i>現有固定測速照相（點進縣市後顯示）</div>
-    <p class="criteria">地點是已用差分隱私公開的毒駕 500m 熱點網格。建議措施依格內公開事故資料判斷：沒有固定測速照相 → 測速照相；有路口事故 ≥ ${m.junctionMin} 件 → 路口科技執法；夜間事故比例 ≥ 全台的 ${m.nightFactor} 倍 → 夜間照明與監測；有死亡 → 優先降速。</p>`;
+    <p class="criteria">建議措施依格內公開事故判斷：沒有固定測速照相 → 測速照相；路口事故 ≥ ${m.junctionMin} 件 → 路口科技執法；夜間事故比例 ≥ 全台 ${m.nightFactor} 倍 → 夜間照明與監測；有死亡 → 優先降速。毒駕件數含差分隱私雜訊（ε = ${m.epsilonGrid}），95% 的情況誤差在 ±${m.margin95} 件內。</p>`;
 }
 
 function renderPreventAreas() {
@@ -455,7 +479,8 @@ function renderPreventSources() {
     <li>地點只使用<b>已加差分隱私雜訊並公開</b>的縣市數字與毒駕 500m 網格，沒有再讀取毒駕個案資料，所以不增加隱私預算。專案的毒駕資料為模擬資料，這部分是方法示範。</li>
     <li>每個網格的事故件數、死傷、夜間比例、高峰時段與最常出事的路口，取自警政署公開的 <b>114 年傷亡道路交通事故資料</b>（${fmt(m.accidents)} 件座標可用）。</li>
     <li>測速照相取自警政署開放資料「<b>測速執法設置點</b>」（${fmt(m.cameraCount)} 支，只含固定式，不含移動式、區間測速與國道）。</li>
-    <li>有 ${m.placeholderCells} 個網格的事故大多是座標預設點（例如許多行政區的事故登記在同一點），無法代表真實地點，不列入。</li>
+    <li>座標預設點（例如許多行政區的事故被登記在同一點）在加雜訊之前就已排除；另有 ${m.placeholderCells} 個網格的事故大多疊在同一個登記地址，無法代表真實地點，不列入建議。</li>
+    <li>「95% 落在」的範圍由公開的加噪數字直接算出（Laplace 雜訊的分布已知），屬於後處理，不花隱私預算。</li>
     <li>這些是<b>優先評估的地點與方向</b>，實際措施仍需現場勘查與交通工程評估，不代表設置後一定能降低傷亡。</li>
   </ol>`;
 }
