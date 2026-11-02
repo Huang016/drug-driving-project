@@ -11,7 +11,7 @@ import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
 SEED = 20261002
-TRAIN_RATIO = 0.8
+TRAIN_RATIO = 0.5  # 50/50 as in config/petsard_config.yaml: a larger training set biases singling-out upward
 LOCATION_SEP = "|"
 
 

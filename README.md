@@ -40,11 +40,11 @@ run_demo.sh                               一鍵跑完 psi_pqc → hotspot_pipel
 
 | 檔案 | 內容 |
 |---|---|
-| `PETsARD_Dataset_A.csv` | A 的原始來源資料（403,088 筆），`code/datagen/generate_abc_v3.py` 以它為基礎產生 `data/raw/Dataset_A_.csv`；`hotspot_pipeline/` 用它取得鄉鎮清單與位置 |
-| `dataset_b_final.csv` | B 的原始輸入（50,000 人，年齡層尚未依性別校準） |
 | `三方資料生成一致性規格書.md` | 舊版規格書，已由本 README 第二部分取代 |
-| `PETsARD_Dataset_A_aligned.csv`、`dataset_b_aligned.csv`、`handoff_master_population.csv` | 重疊比例 20% 的試作版本（B 陽性中 2,351 人在 A），已改採 50%，不使用 |
-| `generate_aligned_three_party_datasets.py`、`rederive_drug_flag_A.py`、`validate_alignment.py` | 上述試作版本的生成與檢查程式 |
+| `handoff_master_population.csv` | 重疊比例 20% 的試作版本（B 陽性中 2,351 人在 A），已改採 50%，不使用 |
+| `generate_aligned_three_party_datasets.py`、`validate_alignment.py` | 上述試作版本的生成與檢查程式 |
+
+A 的原始來源 `PETsARD_Dataset_A.csv`、B 的原始輸入 `dataset_b_final.csv` 與 20% 試作版的 A、B 資料已從 repo 移除；`code/datagen/generate_abc_v3.py` 需要它們才能重新產生資料。`hotspot_pipeline/` 的鄉鎮清單、位置與唯一組合比例改由 `data/raw/Dataset_A_.csv` 取得（以 v3 資料計算，「日期＋時段＋鄉鎮＋年齡層＋性別」的唯一組合比例為 94.2%，舊版資料為 95.0%）。
 
 ---
 
@@ -335,7 +335,7 @@ bash run_demo.sh --pause 2  # 換一個隱私預算 ε（預設 1）
 4. 把 `network.json` 裡的 `host` 改成各台電腦的區網 IP，四台用同一份。
 5. 各自執行 `python node.py <角色>`。協調者跑完會寫出 `hotspot_pipeline/analysis_table.csv`，之後的階段三到五在協調者那台執行。
 
-## 執行結果（2026-10-03）
+## 執行結果（2026-11-03）
 
 | 項目 | 結果 |
 |---|---|
@@ -343,7 +343,7 @@ bash run_demo.sh --pause 2  # 換一個隱私預算 ε（預設 1）
 | 三方交集 | 5,878 人，與真值一致；每一列的縣市、鄉鎮、嚴重度、累犯次數都與 `wide_table_full.csv` 相同 |
 | 傳輸 | 18 則訊息、約 79 MB，在所有密文中搜尋原始身分識別碼：0 個 |
 | 熱區圖（ε = 1） | 367 個鄉鎮，228 個顯示（加雜訊後 ≥ 5 人）；人數最多的 10 個鄉鎮加雜訊後仍全部在前 10 |
-| PETsARD（分析表只有 3 欄，鄉鎮層級） | 保真度 0.97；單挑風險 0.31，超過建議值 0.09。原因是鄉鎮切得太細，正式的合成資料以第三部分（縣市層級寬表）為準 |
+| PETsARD（分析表只有 3 欄，鄉鎮層級，50/50 切分一次） | 保真度 0.86；指認性風險 0.00（95% 信賴區間 0.00–0.13）、連結性 0.00、推論性 0.02，皆低於建議值 0.09。舊版 demo 用 80/20 切分時測得指認性 0.31，是對照組太小造成的高估（見第三部分）。單次切分信賴區間較寬，正式的合成資料以第三部分（15 欄寬表、切分 10 次）為準 |
 
 ## 限制
 

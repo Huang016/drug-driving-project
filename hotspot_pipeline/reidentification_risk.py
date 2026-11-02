@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-SOURCE = Path(__file__).resolve().parent.parent / "PETsARD_Dataset_A.csv"
+SOURCE = Path(__file__).resolve().parent.parent / "data" / "raw" / "Dataset_A_.csv"
 KNOWN_FACTS = {
     "日期＋時段＋鄉鎮": ["event_date", "event_hour", "county", "district"],
     "日期＋時段＋鄉鎮＋年齡層＋性別": ["event_date", "event_hour", "county", "district", "suspect_age_group", "suspect_gender"],
@@ -16,7 +16,7 @@ def main():
     print(f"  原始警政資料 {len(a):,} 筆")
     for label, columns in KNOWN_FACTS.items():
         group_size = a.groupby(columns)[columns[0]].transform("size")
-        print(f"  只知道「{label}」→ {(group_size == 1).mean():.1%} 的人是唯一的一筆")
+        print(f"  只知道「{label}」→ {(group_size == 1).mean():.1%} 的紀錄形成唯一組合")
 
 
 if __name__ == "__main__":
